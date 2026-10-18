@@ -1,17 +1,23 @@
 
-"""Integration test for the initial four-stage harness skeleton."""
+"""Integration test for workflow blocking after Research."""
 
 from harness.graph import build_graph
-from harness.models import RunStatus, StageOutcome, TaskRequest
-from harness.stages.research import research
+from harness.models import ResearchResult, RunStatus, StageOutcome, TaskRequest
 from harness.stages.developer import developer
 from harness.stages.qa import qa
 from harness.stages.release import release
 
 
-def test_unimplemented_research_blocks_workflow():
+def test_blocked_research_stops_workflow():
+    def blocked_research(state):
+        return {
+            "research_result": ResearchResult(
+                outcome=StageOutcome.BLOCKED,
+            )
+        }
+
     graph = build_graph(
-        research=research,
+        research=blocked_research,
         developer=developer,
         qa=qa,
         release=release,

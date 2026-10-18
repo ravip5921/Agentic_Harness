@@ -1,3 +1,6 @@
 langgraph
+requests
+python_dotenv
 pydantic
 pytest
+groq

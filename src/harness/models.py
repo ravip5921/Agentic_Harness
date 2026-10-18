@@ -2,7 +2,8 @@
 from enum import Enum
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 
 class StrictModel(BaseModel):
@@ -70,3 +71,56 @@ class ReleaseResult(StrictModel):
     summary: str = ""
     change_ref: str | None = None
     errors: list[str] = Field(default_factory=list)
+
+
+# Models for Research Stage
+
+class EvidenceSource(StrictModel):
+    """One retrieved, traceable source of research evidence."""
+
+    source_id: str = Field(min_length=1)
+    url: str
+    title: str = ""
+    retrieved_at: str
+    content_sha256: str
+    excerpt: str = ""
+
+
+class EngineeringSpec(StrictModel):
+    """Task-independent implementation specification."""
+
+    title: str = Field(min_length=1)
+    objective: str = Field(min_length=1)
+
+    requirements: list[str] = Field(min_length=1)
+    repository_context: str = ""
+
+    technical_approach: str = Field(min_length=1)
+    implementation_steps: list[str] = Field(min_length=1)
+    acceptance_criteria: list[str] = Field(min_length=1)
+
+    assumptions: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+
+
+class ResearchAssessment(StrictModel):
+    """Model assessment before accepting a research specification."""
+
+    status: Literal["ready", "blocked"]
+    reason: str = ""
+    specification: EngineeringSpec | None = None
+
+    @model_validator(mode="after")
+    def validate_assessment(self):
+        if self.status == "ready" and self.specification is None:
+            raise ValueError(
+                "A ready assessment must contain a specification."
+            )
+
+        if self.status == "blocked" and not self.reason.strip():
+            raise ValueError(
+                "A blocked assessment must explain why."
+            )
+
+        return self
