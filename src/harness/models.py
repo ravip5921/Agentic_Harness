@@ -124,3 +124,60 @@ class ResearchAssessment(StrictModel):
             )
 
         return self
+
+# Models for Developer Stage
+
+
+class FileOperation(str, Enum):
+    CREATE = "create"
+    MODIFY = "modify"
+
+
+class GeneratedFile(StrictModel):
+    """A single file proposed by the Developer Agent."""
+
+    path: str = Field(min_length=1)
+    operation: FileOperation
+    content: str
+    description: str = ""
+
+
+class StagedFile(StrictModel):
+    path: str
+    operation: FileOperation
+    sha256: str
+    original_sha256: str | None = None
+
+
+class ImplementationManifest(StrictModel):
+    summary: str = Field(min_length=1)
+    files: list[StagedFile] = Field(min_length=1)
+    dependencies: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class DevelopmentAssessment(StrictModel):
+    """Developer Agent's structured generation result."""
+
+    status: Literal["ready", "blocked"]
+
+    reason: str = ""
+    files: list[GeneratedFile] = Field(default_factory=list)
+
+    summary: str = ""
+    dependencies: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_assessment(self):
+        if self.status == "ready" and not self.files:
+            raise ValueError(
+                "A ready assessment must contain generated files."
+            )
+
+        if self.status == "blocked" and not self.reason.strip():
+            raise ValueError(
+                "A blocked assessment must explain why."
+            )
+
+        return self
