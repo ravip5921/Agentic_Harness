@@ -4,14 +4,10 @@
 import json
 import os
 
-from dotenv import load_dotenv
-
-load_dotenv()
 
 from groq import Groq
 
 from harness.models import (
-    EngineeringSpec,
     EvidenceSource,
     ResearchAssessment,
     TaskRequest,
@@ -49,24 +45,7 @@ Rules:
 - Make acceptance criteria specific and testable.
 - Never claim that implementation or tests have been completed.
 
-Return ONLY valid JSON, matching this structure:
-
-{
-  "status": "ready" or "blocked",
-  "reason": "explanation, particularly when blocked",
-  "specification": {
-    "title": "...",
-    "objective": "...",
-    "requirements": ["..."],
-    "repository_context": "...",
-    "technical_approach": "...",
-    "implementation_steps": ["..."],
-    "acceptance_criteria": ["..."],
-    "assumptions": [],
-    "constraints": [],
-    "source_ids": []
-  }
-}
+Return ONLY valid JSON object conforming to the supplied schema.
 
 If blocked, specification may be null.
 Use source_ids only from the supplied evidence.
@@ -80,7 +59,10 @@ class ResearchGenerationError(Exception):
 class GroqResearchAgent:
     """Model adapter; can be replaced by a fake in unit tests."""
 
-    def __init__(self, model: str | None = None):
+    def __init__(self, 
+        model: str | None = None,
+        client: Groq | None = None,
+    ):
         self.model = model or os.getenv(
             "GROQ_MODEL", "openai/gpt-oss-20b"
         )
@@ -97,6 +79,14 @@ class GroqResearchAgent:
         repository: RepositoryContext | None,
         evidence: list[EvidenceSource],
     ) -> ResearchAssessment:
+
+        schema = ResearchAssessment.model_json_schema()
+
+        system_prompt = (
+            SYSTEM_PROMPT
+            + "\n\nRequired JSON Schema:\n"
+            + json.dumps(schema, indent=2)
+        )
 
         context = {
             "task": task.model_dump(
@@ -122,7 +112,7 @@ class GroqResearchAgent:
                 messages=[
                     {
                         "role": "system",
-                        "content": SYSTEM_PROMPT,
+                        "content": system_prompt,
                     },
                     {
                         "role": "user",
