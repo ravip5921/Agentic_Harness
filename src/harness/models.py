@@ -1,4 +1,6 @@
 """Task-independent contracts for the four-stage harness."""
+from __future__ import annotations
+
 from enum import Enum
 from uuid import uuid4
 
@@ -63,8 +65,8 @@ class QAResult(StrictModel):
     verdict: QAVerdict
     summary: str = ""
     report_path: str | None = None
-    feedback: list[str] = Field(default_factory=list)
 
+    feedback: QAFeedback | None = None
 
 class ReleaseResult(StrictModel):
     status: ReleaseStatus
@@ -181,3 +183,147 @@ class DevelopmentAssessment(StrictModel):
             )
 
         return self
+
+
+# Models for QA Stage
+
+
+class QACheckType(str, Enum):
+    """Category of verification performed by QA."""
+
+    INTEGRITY = "integrity"
+    SYNTAX = "syntax"
+    UNIT_TEST = "unit_test"
+    CONTRACT_TEST = "contract_test"
+    INTEGRATION_TEST = "integration_test"
+
+
+class QACheckStatus(str, Enum):
+    PASSED = "passed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    BLOCKED = "blocked"
+
+
+class QACheckResult(StrictModel):
+    """Result of one independently recorded QA check."""
+
+    name: str = Field(min_length=1)
+    check_type: QACheckType
+    status: QACheckStatus
+
+    command: list[str] = Field(default_factory=list)
+    exit_code: int | None = None
+
+    duration_seconds: float | None = Field(
+        default=None,
+        ge=0,
+    )
+
+    stdout: str = ""
+    stderr: str = ""
+
+    timed_out: bool = False
+    message: str = ""
+
+
+class QAReport(StrictModel):
+    """Complete verification report for one development attempt."""
+
+    run_id: str = Field(min_length=1)
+    revision_count: int = Field(ge=0)
+
+    verdict: QAVerdict
+    summary: str = ""
+
+    checks: list[QACheckResult] = Field(
+        default_factory=list
+    )
+
+    feedback: QAFeedback | None = None
+
+    manifest_path: str
+    workspace_path: str | None = None
+
+    @model_validator(mode="after")
+    def validate_verdict(self):
+        # A passing report must contain executed, passing checks.
+        if self.verdict == QAVerdict.PASS:
+            if not self.checks:
+                raise ValueError(
+                    "QA cannot pass without verification checks."
+                )
+
+            if not any(
+                check.check_type in {
+                    QACheckType.UNIT_TEST,
+                    QACheckType.CONTRACT_TEST,
+                    QACheckType.INTEGRATION_TEST,
+                }
+                and check.status == QACheckStatus.PASSED
+                for check in self.checks
+            ):
+                raise ValueError(
+                    "QA PASS requires at least one passing test check."
+                )
+
+            if any(
+                check.status != QACheckStatus.PASSED
+                for check in self.checks
+            ):
+                raise ValueError(
+                    "QA PASS cannot contain failed, skipped, or blocked checks."
+                )
+
+        return self
+
+# Structured QA feedback models
+
+
+class QAFeedbackCategory(str, Enum):
+    SYNTAX = "syntax"
+    TEST_FAILURE = "test_failure"
+    CONTRACT = "contract"
+    IMPLEMENTATION = "implementation"
+
+
+class FileFeedback(StrictModel):
+    """Actionable feedback associated with one implementation file."""
+
+    path: str = Field(min_length=1)
+    category: QAFeedbackCategory
+    message: str = Field(min_length=1)
+
+    line: int | None = Field(default=None, ge=1)
+    related_test: str | None = None
+
+
+class TestFeedback(StrictModel):
+    """Details of a failing test."""
+
+    test_name: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+
+    related_files: list[str] = Field(default_factory=list)
+    check_name: str | None = None
+
+
+class QAFeedback(StrictModel):
+    """Structured feedback for a development revision."""
+
+    summary: str = Field(min_length=1)
+
+    file_feedback: list[FileFeedback] = Field(
+        default_factory=list
+    )
+
+    test_feedback: list[TestFeedback] = Field(
+        default_factory=list
+    )
+
+    recommendations: list[str] = Field(
+        default_factory=list
+    )
+
+    # Identifies the implementation the feedback refers to.
+    development_attempt: int = Field(ge=0)
