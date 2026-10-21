@@ -115,16 +115,24 @@ def validate_modifications(
         # characters, since their original bytes won't match.
         actual_content = original_path.read_bytes()
 
-        inspected_content = repository.excerpts[
-            relative_name
-        ].encode("utf-8")
+        try:
+            actual_text = actual_content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise DevelopmentValidationError(
+                f"Original file is not valid UTF-8: {relative_name}"
+            ) from exc
 
-        if actual_content != inspected_content:
+        inspected_text = repository.excerpts[relative_name]
+
+        # Normalize newline representations for comparison.
+        def normalize_newlines(text: str) -> str:
+            return text.replace("\r\n", "\n").replace("\r", "\n")
+
+        if normalize_newlines(actual_text) != normalize_newlines(inspected_text):
             raise DevelopmentValidationError(
                 f"Original file changed or was not fully inspected: "
                 f"{relative_name}"
             )
-
 
 def write_manifest(
     manifest: ImplementationManifest,
