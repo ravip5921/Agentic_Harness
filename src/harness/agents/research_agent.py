@@ -138,4 +138,5 @@ class GroqResearchAgent:
         except Exception as exc:
             raise ResearchGenerationError(
                 "Research model generation or validation failed."
+                  f"{type(exc).__name__}: {exc}"
             ) from exc
