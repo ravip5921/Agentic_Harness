@@ -23,6 +23,10 @@ from harness.models import (
     FileOperation,
     ImplementationManifest,
     StageOutcome,
+    PreviousFile,
+    PreviousImplementation,
+    QAFeedback,
+    QAVerdict,
 )
 
 from harness.state import HarnessState
@@ -48,7 +52,10 @@ from harness.tools.filesystem import (
     validate_repository_file,
     FilesystemError,
 )
-
+from harness.tools.artifacts import (
+    ArtifactError,
+    load_development_artifacts,
+)
 
 class DevelopmentValidationError(Exception):
     """Raised when a proposed implementation is not safe to stage."""
@@ -167,11 +174,82 @@ def write_manifest(
             temporary_path.unlink(missing_ok=True)
 
 
+MAX_PREVIOUS_CONTEXT_BYTES = 100_000
+
+
+def load_previous_implementation(
+    state: HarnessState,
+    runs_dir: Path = Path("runs"),
+) -> PreviousImplementation:
+    """Load verified files from the previous Development attempt.
+
+    The previous attempt's manifest and staged files are validated
+    before their contents are included in the Developer Agent context.
+    """
+
+    revision_count = state.get("revision_count", 0)
+
+    if revision_count < 1:
+        raise DevelopmentValidationError(
+            "Previous implementation is only available on retries."
+        )
+
+    previous_attempt = revision_count - 1
+
+    # Reuse the artifact loader, which identifies the attempt
+    # using revision_count.
+    previous_state = {
+        **state,
+        "revision_count": previous_attempt,
+    }
+
+    manifest, staging_dir = load_development_artifacts(
+        previous_state,
+        runs_dir=runs_dir,
+    )
+
+    files = []
+    total_bytes = 0
+
+    for record in manifest.files:
+        relative_path = validate_relative_path(record.path)
+        file_path = staging_dir / relative_path
+
+        content_bytes = file_path.read_bytes()
+
+        total_bytes += len(content_bytes)
+
+        if total_bytes > MAX_PREVIOUS_CONTEXT_BYTES:
+            raise DevelopmentValidationError(
+                "Previous implementation exceeds the "
+                "Developer Agent context size limit."
+            )
+
+        try:
+            content = content_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise DevelopmentValidationError(
+                f"Previous generated file is not UTF-8: {record.path}"
+            ) from exc
+
+        files.append(
+            PreviousFile(
+                path=record.path,
+                operation=record.operation,
+                content=content,
+            )
+        )
+
+    return PreviousImplementation(
+        development_attempt=previous_attempt,
+        files=files,
+    )
 def make_developer_stage(
     generator: Callable,
     specification_loader: Callable = load_engineering_spec,
     repository_reader: Callable = inspect_repository,
     file_stager: Callable = stage_generated_files,
+    previous_implementation_loader: Callable = load_previous_implementation,
     runs_dir: Path = Path("runs"),
 ):
     """Create a Developer stage with injectable dependencies.
@@ -271,22 +349,45 @@ def make_developer_stage(
 
             # 3. Collect previous QA feedback, only on retry.
             qa_feedback = None
+            previous_implementation = None
 
             if revision_count > 0:
                 qa_result = state.get("qa_result")
 
-                if qa_result is None or not qa_result.feedback:
+                if (
+                    qa_result is None
+                    or qa_result.verdict != QAVerdict.FAIL
+                    or qa_result.feedback is None
+                ):
                     raise DevelopmentValidationError(
-                        "QA retry requires actionable feedback."
+                        "Developer retry requires failed QA "
+                        "with structured feedback."
                     )
 
                 qa_feedback = qa_result.feedback
+
+                if not isinstance(qa_feedback, QAFeedback):
+                    raise DevelopmentValidationError(
+                        "QA feedback must be a QAFeedback object."
+                    )
+
+                if qa_feedback.development_attempt != revision_count - 1:
+                    raise DevelopmentValidationError(
+                        "QA feedback does not match the previous "
+                        "development attempt."
+                    )
+
+                previous_implementation = previous_implementation_loader(
+                    state,
+                    runs_dir=runs_root,
+                )
 
             # 4. Generate an implementation proposal.
             assessment = generator(
                 specification,
                 repository,
                 qa_feedback,
+                previous_implementation,
             )
 
             if not isinstance(assessment, DevelopmentAssessment):
@@ -349,6 +450,7 @@ def make_developer_stage(
         except (
             SpecificationError,
             RepositoryError,
+            ArtifactError,
             FileNotFoundError,
         ) as exc:
             result = DevelopmentResult(

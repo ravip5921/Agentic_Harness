@@ -14,6 +14,8 @@ from harness.models import (
     FileOperation,
     GeneratedFile,
     ImplementationManifest,
+    PreviousFile,
+    PreviousImplementation,
     QAFeedback,
     QAResult,
     QAVerdict,
@@ -74,7 +76,9 @@ def make_state(tmp_path, repository_path=None):
     }
 
 
-def successful_generator(specification, repository, qa_feedback):
+def successful_generator(
+    specification, repository, qa_feedback, previous_implementation,
+):
     """Simulate successful generation of multiple files."""
 
     return DevelopmentAssessment(
@@ -166,7 +170,9 @@ def test_repository_modification_preserves_original(tmp_path):
 
     state = make_state(tmp_path, repository)
 
-    def generator(specification, repository_context, qa_feedback):
+    def generator(
+        specification, repository_context, qa_feedback, previous_implementation,
+    ):
         assert repository_context is not None
         assert repository_context.excerpts["config.py"] == original
 
@@ -250,7 +256,9 @@ def test_missing_specification_blocks_development(tmp_path):
 def test_blocked_agent_does_not_stage_files(tmp_path):
     state = make_state(tmp_path)
 
-    def blocked_generator(specification, repository, qa_feedback):
+    def blocked_generator(
+        specification, repository, qa_feedback, previous_implementation,
+    ):
         return DevelopmentAssessment(
             status="blocked",
             reason="Implementation requirements are insufficient.",
@@ -277,7 +285,9 @@ def test_blocked_agent_does_not_stage_files(tmp_path):
 def test_unsafe_generated_path_is_rejected(tmp_path):
     state = make_state(tmp_path)
 
-    def unsafe_generator(specification, repository, qa_feedback):
+    def unsafe_generator(
+        specification, repository, qa_feedback, previous_implementation,
+    ):
         return DevelopmentAssessment(
             status="ready",
             summary="Unsafe implementation.",
@@ -318,7 +328,9 @@ def test_incomplete_repository_context_blocks_modify(tmp_path):
             truncated=True,
         )
 
-    def modify_generator(specification, repository_context, feedback):
+    def modify_generator(
+        specification, repository_context, qa_feedback, previous_implementation,
+    ):
         return DevelopmentAssessment(
             status="ready",
             summary="Modify an existing file.",
@@ -346,7 +358,9 @@ def test_incomplete_repository_context_blocks_modify(tmp_path):
 def test_invalid_generator_response_is_rejected(tmp_path):
     state = make_state(tmp_path)
 
-    def invalid_generator(specification, repository, qa_feedback):
+    def invalid_generator(
+        specification, repository, qa_feedback, previous_implementation,
+    ):
         return {"status": "ready"}
 
     developer = create_stage(
@@ -368,9 +382,13 @@ def test_qa_retry_uses_separate_attempt(tmp_path):
     state = make_state(tmp_path)
 
     received_feedback = []
+    received_previous = []
 
-    def generator(specification, repository, qa_feedback):
+    def generator(
+        specification, repository, qa_feedback, previous_implementation,
+    ):
         received_feedback.append(qa_feedback)
+        received_previous.append(previous_implementation)
 
         revision = len(received_feedback) - 1
 
@@ -392,6 +410,7 @@ def test_qa_retry_uses_separate_attempt(tmp_path):
 
     assert first.outcome == StageOutcome.COMPLETED
 
+    state["development_result"] = first
     state["revision_count"] = 1
     state["qa_result"] = QAResult(
         verdict=QAVerdict.FAIL,
@@ -424,6 +443,88 @@ def test_qa_retry_uses_separate_attempt(tmp_path):
             development_attempt=0,
         ),
     ]
+    assert received_previous == [
+        None,
+        PreviousImplementation(
+            development_attempt=0,
+            files=[PreviousFile(
+                path="main.py",
+                operation=FileOperation.CREATE,
+                content="VERSION = 0\n",
+            )],
+        ),
+    ]
+
+
+def test_retry_receives_feedback_and_previous_files(tmp_path):
+    state = make_state(tmp_path)
+    feedback = QAFeedback(summary="Fix the greeting.", development_attempt=0)
+    previous = PreviousImplementation(
+        development_attempt=0,
+        files=[PreviousFile(
+            path="greet.py",
+            operation=FileOperation.CREATE,
+            content="def greet(name):\n    return name\n",
+        )],
+    )
+    captured = {}
+
+    def generator(specification, repository, qa_feedback, previous_implementation):
+        captured["feedback"] = qa_feedback
+        captured["previous"] = previous_implementation
+        return DevelopmentAssessment(status="blocked", reason="Captured retry context.")
+
+    def previous_loader(current_state, runs_dir):
+        assert current_state is state
+        assert runs_dir == tmp_path.resolve()
+        return previous
+
+    state.update(
+        revision_count=1,
+        qa_result=QAResult(verdict=QAVerdict.FAIL, feedback=feedback),
+    )
+    stage = create_stage(
+        tmp_path,
+        generator=generator,
+        previous_implementation_loader=previous_loader,
+    )
+
+    result = stage(state)["development_result"]
+
+    assert result.outcome == StageOutcome.BLOCKED
+    assert result.summary == "Captured retry context."
+    assert captured["feedback"] is feedback
+    assert captured["previous"] is previous
+
+
+@pytest.mark.parametrize("feedback_attempt", [0, 2])
+def test_retry_rejects_feedback_for_wrong_attempt(tmp_path, feedback_attempt):
+    state = make_state(tmp_path)
+    state.update(
+        revision_count=2,
+        qa_result=QAResult(
+            verdict=QAVerdict.FAIL,
+            feedback=QAFeedback(
+                summary="Feedback from the wrong attempt.",
+                development_attempt=feedback_attempt,
+            ),
+        ),
+    )
+
+    def unexpected_call(*args, **kwargs):
+        pytest.fail("Mismatched feedback must block before loading or generation.")
+
+    stage = create_stage(
+        tmp_path,
+        generator=unexpected_call,
+        previous_implementation_loader=unexpected_call,
+    )
+
+    result = stage(state)["development_result"]
+
+    assert result.outcome == StageOutcome.BLOCKED
+    assert "does not match the previous development attempt" in result.errors[0]
+    assert result.artifacts == []
 
 
 def test_retry_requires_qa_feedback(tmp_path):

@@ -327,3 +327,21 @@ class QAFeedback(StrictModel):
 
     # Identifies the implementation the feedback refers to.
     development_attempt: int = Field(ge=0)
+
+
+# Models for Developer revision context
+
+
+class PreviousFile(StrictModel):
+    """A previously generated implementation file."""
+
+    path: str = Field(min_length=1)
+    operation: FileOperation
+    content: str
+
+
+class PreviousImplementation(StrictModel):
+    """Validated implementation from an earlier development attempt."""
+
+    development_attempt: int = Field(ge=0)
+    files: list[PreviousFile] = Field(min_length=1)

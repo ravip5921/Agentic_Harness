@@ -17,6 +17,8 @@ from harness.models import (
     DevelopmentAssessment,
     EngineeringSpec,
     FileOperation,
+    PreviousFile,
+    PreviousImplementation,
     QAFeedback,
 )
 from harness.tools.repository import RepositoryContext
@@ -125,6 +127,7 @@ def test_successful_generation_full_flow():
     assert sent_context["specification"]["title"] == spec.title
     assert sent_context["repository"] is None
     assert sent_context["qa_feedback"] is None
+    assert sent_context["previous_implementation"] is None
 
     # Inspect the validated result.
     assert isinstance(assessment, DevelopmentAssessment)
@@ -164,6 +167,14 @@ def test_repository_context_and_qa_feedback_are_forwarded():
         },
     )
 
+    previous = PreviousImplementation(
+        development_attempt=0,
+        files=[PreviousFile(
+            path="src/service.py",
+            operation=FileOperation.MODIFY,
+            content="def get_users():\n    return []\n",
+        )],
+    )
     assessment = agent.generate(
         specification=sample_spec(),
         repository=repository,
@@ -171,6 +182,7 @@ def test_repository_context_and_qa_feedback_are_forwarded():
             summary="Test failed: empty result",
             development_attempt=0,
         ),
+        previous_implementation=previous,
     )
 
     context = json.loads(
@@ -185,6 +197,7 @@ def test_repository_context_and_qa_feedback_are_forwarded():
         summary="Test failed: empty result",
         development_attempt=0,
     ).model_dump(mode="json")
+    assert context["previous_implementation"] == previous.model_dump(mode="json")
 
     assert assessment.files[0].operation == FileOperation.MODIFY
 

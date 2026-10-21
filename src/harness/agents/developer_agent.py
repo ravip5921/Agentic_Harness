@@ -56,6 +56,18 @@ Rules:
     an explanation rather than inventing an implementation.
 15. Do not produce shell commands for execution or perform filesystem
     operations. Return generated file contents only.
+16. On a QA-triggered retry, use the supplied previous_implementation
+    and qa_feedback to identify and correct the reported defects.
+17. The previous_implementation contains generated files from the
+    preceding development attempt, not files already integrated into
+    the target repository.
+18. On retries, return the complete revised implementation,
+    including generated files that do not require changes.
+19. Preserve the original CREATE/MODIFY operation for each
+    previously generated file unless a justified change is needed.
+20. Do not assume paths from previous_implementation exist in
+    the original target repository. Existing-repository checks
+    must use repository context, not previous generated files.
 
 Return ONLY a valid JSON object with the supplied structure.
 
@@ -93,6 +105,7 @@ class GroqDeveloperAgent:
         specification: EngineeringSpec,
         repository: RepositoryContext | None = None,
         qa_feedback: QAFeedback | None = None,
+        previous_implementation: PreviousImplementation | None = None,
     ) -> DevelopmentAssessment:
         """Generate implementation files from a validated specification.
 
@@ -127,6 +140,11 @@ class GroqDeveloperAgent:
             "qa_feedback": (
                 qa_feedback.model_dump(mode="json")
                 if qa_feedback is not None
+                else None
+            ),
+            "previous_implementation": (
+                previous_implementation.model_dump(mode="json")
+                if previous_implementation is not None
                 else None
             ),
         }
