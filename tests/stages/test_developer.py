@@ -14,6 +14,7 @@ from harness.models import (
     FileOperation,
     GeneratedFile,
     ImplementationManifest,
+    QAFeedback,
     QAResult,
     QAVerdict,
     ResearchResult,
@@ -369,7 +370,7 @@ def test_qa_retry_uses_separate_attempt(tmp_path):
     received_feedback = []
 
     def generator(specification, repository, qa_feedback):
-        received_feedback.append(list(qa_feedback))
+        received_feedback.append(qa_feedback)
 
         revision = len(received_feedback) - 1
 
@@ -394,7 +395,10 @@ def test_qa_retry_uses_separate_attempt(tmp_path):
     state["revision_count"] = 1
     state["qa_result"] = QAResult(
         verdict=QAVerdict.FAIL,
-        feedback=["Generated code failed a test."],
+        feedback=QAFeedback(
+            summary="Generated code failed a test.",
+            development_attempt=0,
+        ),
     )
 
     second = developer(state)["development_result"]
@@ -414,8 +418,11 @@ def test_qa_retry_uses_separate_attempt(tmp_path):
     ).read_text() == "VERSION = 1\n"
 
     assert received_feedback == [
-        [],
-        ["Generated code failed a test."],
+        None,
+        QAFeedback(
+            summary="Generated code failed a test.",
+            development_attempt=0,
+        ),
     ]
 
 

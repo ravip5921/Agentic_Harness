@@ -270,7 +270,7 @@ def make_developer_stage(
                 )
 
             # 3. Collect previous QA feedback, only on retry.
-            qa_feedback = []
+            qa_feedback = None
 
             if revision_count > 0:
                 qa_result = state.get("qa_result")

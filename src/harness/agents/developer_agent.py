@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from harness.models import (
     DevelopmentAssessment,
     EngineeringSpec,
+    QAFeedback,
 )
 from harness.tools.repository import RepositoryContext
 
@@ -91,7 +92,7 @@ class GroqDeveloperAgent:
         self,
         specification: EngineeringSpec,
         repository: RepositoryContext | None = None,
-        qa_feedback: list[str] | None = None,
+        qa_feedback: QAFeedback | None = None,
     ) -> DevelopmentAssessment:
         """Generate implementation files from a validated specification.
 
@@ -123,7 +124,11 @@ class GroqDeveloperAgent:
                 if repository is not None
                 else None
             ),
-            "qa_feedback": qa_feedback or [],
+            "qa_feedback": (
+                qa_feedback.model_dump(mode="json")
+                if qa_feedback is not None
+                else None
+            ),
         }
 
         try:

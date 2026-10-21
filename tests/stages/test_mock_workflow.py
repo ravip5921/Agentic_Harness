@@ -3,6 +3,7 @@
 from harness.graph import build_graph
 from harness.models import (
     DevelopmentResult,
+    QAFeedback,
     QAResult,
     QAVerdict,
     ReleaseResult,
@@ -118,7 +119,10 @@ def test_qa_failure_triggers_development_retry():
             return {
                 "qa_result": QAResult(
                     verdict=QAVerdict.FAIL,
-                    feedback=["Simulated test failure."],
+                    feedback=QAFeedback(
+                        summary="Simulated test failure.",
+                        development_attempt=0,
+                    ),
                 )
             }
 

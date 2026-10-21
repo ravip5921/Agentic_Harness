@@ -9,7 +9,7 @@ Responsibilities:
 
 """
 
-from harness.models import QAResult, QAVerdict
+from harness.models import QAFeedback, QAResult, QAVerdict
 from harness.state import HarnessState
 
 
@@ -20,7 +20,10 @@ def qa(state: HarnessState) -> dict:
         verdict=QAVerdict.BLOCKED,
         summary="QA stage is not yet implemented.",
         report_path=None,
-        feedback=["Test execution is not yet available."],
+        feedback=QAFeedback(
+            summary="Test execution is not yet available.",
+            development_attempt=state.get("revision_count", 0),
+        ),
     )
 
     return {"qa_result": result}
