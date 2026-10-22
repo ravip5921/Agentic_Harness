@@ -384,3 +384,23 @@ class QARequirementAssessment(StrictModel):
     )
 
     overall_summary: str = Field(min_length=1)
+
+
+# Models for Release Stage
+
+
+class ReleaseManifest(StrictModel):
+    """Description of a staged release."""
+
+    run_id: str
+    revision_count: int
+
+    summary: str
+
+    files: list[StagedFile]
+
+    source_manifest_path: str
+    qa_report_path: str
+
+    repository_path: str | None = None
+    release_directory: str
