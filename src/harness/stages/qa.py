@@ -19,7 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import logging
-
+logger = logging.getLogger(__name__)
 
 from harness.models import (
     QAFeedback,
@@ -29,6 +29,9 @@ from harness.models import (
     QAReport,
     QAResult,
     QAVerdict,
+    QARequirementAssessment,
+    RequirementStatus,
+    ImplementationManifest,
 )
 from harness.state import HarnessState
 
@@ -40,11 +43,21 @@ from harness.tools.qa_workspace import (
     QAWorkspaceError,
     prepare_qa_workspace,
 )
+from harness.tools.qa_context import (
+    QAContextError,
+    load_qa_implementation_context,
+)
+
+from harness.tools.qa_requirements import (
+    validate_requirement_coverage,
+    RequirementCoverageError,
+)
 from harness.tools.executor import (
     QAExecutionError,
     execute_check,
 )
 from harness.tools.specifications import (
+    SpecificationError,
     load_engineering_spec,
 )
 from harness.agents.qa_agent import (
@@ -129,45 +142,95 @@ def determine_verdict(
 def build_feedback(
     checks: list[QACheckResult],
     revision_count: int,
+    requirements_assessment: QARequirementAssessment | None = None,
 ) -> QAFeedback | None:
-    """Generate initial structured feedback from failing checks.
+    """Build deterministic feedback from tests and requirements."""
 
-    Detailed file and test attribution will be added when we
-    implement richer test-result parsing.
-    """
+    recommendations = []
 
-    failed = [
+    failed_checks = [
         check
         for check in checks
         if check.status == QACheckStatus.FAILED
     ]
 
-    if not failed:
-        return None
-
-    recommendations = []
-
-    for check in failed:
-        # Preserve relevant output for the next Developer attempt.
+    for check in failed_checks:
         output = "\n".join(
             part.strip()
             for part in (check.stdout, check.stderr)
             if part and part.strip()
         )
 
-        details = output[-4000:] if output else check.message
-
         recommendations.append(
-            f"{check.check_type.value} check failed "
-            f"({check.name}):\n{details}"
+            f"{check.check_type.value} failed "
+            f"({check.name}):\n"
+            f"{output[-4000:] if output else check.message}"
         )
 
+    if requirements_assessment is not None:
+        for finding in requirements_assessment.findings:
+            if finding.status != RequirementStatus.NOT_SATISFIED:
+                continue
+
+            recommendations.append(
+                f"{finding.requirement_id}: "
+                f"{finding.requirement}\n"
+                f"Finding: {finding.explanation}"
+            )
+
+            for gap in finding.missing_coverage:
+                recommendations.append(
+                    f"{finding.requirement_id} missing coverage: {gap}"
+                )
+
+    if not recommendations:
+        return None
+
     return QAFeedback(
-        summary=f"{len(failed)} QA check(s) failed.",
+        summary=(
+            f"{len(failed_checks)} execution check(s) failed; "
+            f"{len(recommendations)} feedback item(s)."
+        ),
         development_attempt=revision_count,
         recommendations=recommendations,
     )
 
+
+def combine_qa_verdicts(
+    execution_verdict: QAVerdict,
+    requirements_assessment: QARequirementAssessment | None,
+) -> QAVerdict:
+    """Combine test results and requirement findings.
+
+    Execution failures remain FAIL.
+    Infrastructure blocks remain BLOCKED.
+    Requirements assessment is mandatory for PASS.
+    """
+
+    if execution_verdict == QAVerdict.BLOCKED:
+        return QAVerdict.BLOCKED
+
+    if execution_verdict == QAVerdict.FAIL:
+        return QAVerdict.FAIL
+
+    if requirements_assessment is None:
+        return QAVerdict.BLOCKED
+
+    statuses = {
+        finding.status
+        for finding in requirements_assessment.findings
+    }
+
+    if RequirementStatus.NOT_SATISFIED in statuses:
+        return QAVerdict.FAIL
+
+    if RequirementStatus.UNCERTAIN in statuses:
+        return QAVerdict.BLOCKED
+
+    if statuses == {RequirementStatus.SATISFIED}:
+        return QAVerdict.PASS
+
+    return QAVerdict.BLOCKED
 
 def write_qa_report(
     report: QAReport,
@@ -213,6 +276,8 @@ def make_qa_stage(
     test_executor=execute_check,
     report_writer=write_qa_report,
     specification_loader=load_engineering_spec,
+    context_loader=load_qa_implementation_context,
+    requirements_assessor=None,
     feedback_generator=None,
     runs_dir: Path = Path("runs"),
 ):
@@ -315,66 +380,152 @@ def make_qa_stage(
                 if result.status == QACheckStatus.BLOCKED:
                     break
 
-            # 4. Determine verdict and construct feedback.
-            verdict = determine_verdict(checks)
+            # 4. Determine execution verdict.
+            execution_verdict = determine_verdict(checks)
 
-            feedback = None
+            requirements_assessment = None
+            assessment_error = None
 
-            if verdict == QAVerdict.FAIL:
-                # Deterministic fallback is always available.
-                feedback = build_feedback(checks, revision_count)
+            # Requirements evaluation is necessary for PASS.
+            # We also run it on FAIL when possible to identify additional defects.
+            if (
+                requirements_assessor is not None
+                and execution_verdict != QAVerdict.BLOCKED
+            ):
+                try:
+                    specification = specification_loader(
+                        state,
+                        runs_dir=runs_root,
+                    )
 
-                if feedback_generator is not None:
-                    try:
-                        specification = specification_loader(
-                            state,
-                            runs_dir=runs_root,
+                    implementation = context_loader(
+                        state,
+                        runs_dir=runs_root,
+                    )
+
+                    requirements_assessment = requirements_assessor(
+                        task,
+                        specification,
+                        manifest,
+                        implementation,
+                        checks,
+                    )
+
+                    if not isinstance(
+                        requirements_assessment,
+                        QARequirementAssessment,
+                    ):
+                        raise QAStageError(
+                            "Requirements assessor returned an invalid type."
                         )
 
-                        excerpts = collect_file_excerpts(
-                            manifest,
-                            workspace,
+                    # Validate even injected assessors, not just GroqQAAgent.
+                    validate_requirement_coverage(
+                        requirements_assessment,
+                        specification,
+                        manifest,
+                    )
+
+                except Exception as exc:
+                    logger.exception(
+                        "Requirements assessment failed for run %s, attempt %d",
+                        task.run_id,
+                        revision_count,
+                    )
+                    assessment_error = str(exc)
+                    requirements_assessment = None
+
+            # 5. Combine execution and requirements findings.
+            verdict = combine_qa_verdicts(
+                execution_verdict,
+                requirements_assessment,
+            )
+
+            # 6. Build deterministic fallback feedback.
+            feedback = (
+                build_feedback(
+                    checks,
+                    revision_count,
+                    requirements_assessment,
+                )
+                if verdict == QAVerdict.FAIL
+                else None
+            )
+
+            # Optional LLM-assisted repair explanation.
+            if verdict == QAVerdict.FAIL and feedback_generator is not None:
+                try:
+                    # Reuse the specification if the assessment loaded it.
+                    # Otherwise obtain it here for failure analysis.
+                    specification = specification_loader(
+                        state,
+                        runs_dir=runs_root,
+                    )
+
+                    excerpts = collect_file_excerpts(
+                        manifest,
+                        workspace,
+                    )
+
+                    generated_feedback = feedback_generator(
+                        specification,
+                        manifest,
+                        checks,
+                        revision_count,
+                        excerpts,
+                    )
+
+                    if not isinstance(generated_feedback, QAFeedback):
+                        raise QAGenerationError(
+                            "QA Agent must return QAFeedback."
                         )
 
-                        generated_feedback = feedback_generator(
-                            specification,
-                            manifest,
-                            checks,
-                            revision_count,
-                            excerpts,
+                    if generated_feedback.development_attempt != revision_count:
+                        raise QAGenerationError(
+                            "Feedback references the wrong development attempt."
                         )
 
-                        if not isinstance(generated_feedback, QAFeedback):
-                            raise QAGenerationError(
-                                "QA Agent must return QAFeedback."
+                    # Preserve deterministic findings even when the LLM provides
+                    # additional analysis or overlooks a reported failure.
+                    if feedback is not None:
+                        generated_feedback.recommendations = list(
+                            dict.fromkeys(
+                                feedback.recommendations
+                                + generated_feedback.recommendations
                             )
-
-                        if generated_feedback.development_attempt != revision_count:
-                            raise QAGenerationError(
-                                "Feedback references the wrong attempt."
-                            )
-
-                        feedback = generated_feedback
-
-                    except (Exception):
-                        logger = logging.getLogger(__name__)
-
-                        # Preserve test findings if the LLM fails.
-                        # Groq failure must not change a genuine QA FAIL
-                        # to BLOCKED or PASS.
-                        logger.exception(
-                            "QA feedback generation failed for run %s, attempt %d. "
-                            "Using deterministic feedback instead.",
-                            task.run_id,
-                            revision_count,
                         )
-                        pass
+
+                    feedback = generated_feedback
+
+                except Exception:
+                    logger.exception(
+                        "Feedback generation failed for run %s, attempt %d. "
+                        "Using deterministic feedback.",
+                        task.run_id,
+                        revision_count,
+                    )
+
+            # 7. Produce summary.
             if verdict == QAVerdict.PASS:
-                summary = "All required QA checks passed."
+                summary = (
+                    "Execution checks passed and all requirements "
+                    "were assessed as satisfied."
+                )
+
             elif verdict == QAVerdict.FAIL:
-                summary = "Implementation failed QA checks."
+                summary = (
+                    "Implementation failed execution or requirements QA."
+                )
+
             else:
                 summary = "QA verification was blocked."
+
+                if assessment_error:
+                    summary += (
+                        f" Requirements assessment unavailable: "
+                        f"{assessment_error}"
+                    )
+
 
             # 5. Persist a structured QA report.
             report = QAReport(
@@ -383,6 +534,7 @@ def make_qa_stage(
                 verdict=verdict,
                 summary=summary,
                 checks=checks,
+                requirements_assessment=requirements_assessment,
                 feedback=feedback,
                 manifest_path=str(
                     runs_root
@@ -433,6 +585,7 @@ def qa(state: HarnessState) -> dict:
     agent = GroqQAAgent()
 
     node = make_qa_stage(
+        requirements_assessor=agent.assess_requirements,
         feedback_generator=agent.generate,
     )
 

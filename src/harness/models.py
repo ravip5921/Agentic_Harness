@@ -244,7 +244,8 @@ class QAReport(StrictModel):
 
     manifest_path: str
     workspace_path: str | None = None
-
+    requirements_assessment: QARequirementAssessment | None = None
+    
     @model_validator(mode="after")
     def validate_verdict(self):
         # A passing report must contain executed, passing checks.
@@ -345,3 +346,41 @@ class PreviousImplementation(StrictModel):
 
     development_attempt: int = Field(ge=0)
     files: list[PreviousFile] = Field(min_length=1)
+
+
+class RequirementStatus(str, Enum):
+    SATISFIED = "satisfied"
+    NOT_SATISFIED = "not_satisfied"
+    UNCERTAIN = "uncertain"
+
+
+class RequirementFinding(StrictModel):
+    """Assessment of one requirement or acceptance criterion."""
+    requirement_id: str = Field(min_length=1)
+
+    requirement: str = Field(min_length=1)
+    status: RequirementStatus
+
+    explanation: str = Field(min_length=1)
+
+    implementation_files: list[str] = Field(
+        default_factory=list
+    )
+
+    test_files: list[str] = Field(
+        default_factory=list
+    )
+
+    missing_coverage: list[str] = Field(
+        default_factory=list
+    )
+
+
+class QARequirementAssessment(StrictModel):
+    """LLM assessment of implementation and test completeness."""
+
+    findings: list[RequirementFinding] = Field(
+        min_length=1
+    )
+
+    overall_summary: str = Field(min_length=1)

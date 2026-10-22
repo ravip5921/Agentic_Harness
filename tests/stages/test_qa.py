@@ -14,8 +14,20 @@ from harness.models import (
     QAVerdict,
     StageOutcome,
     TaskRequest,
+    EngineeringSpec,
+    FileOperation,
+    QARequirementAssessment,
+    RequirementFinding,
+    RequirementStatus,
 )
-from harness.stages.qa import make_qa_stage
+from harness.stages.qa import (
+    combine_qa_verdicts,
+    make_qa_stage,
+)
+from harness.tools.qa_context import (
+    QAImplementationContext,
+    VerifiedSourceFile,
+)
 
 
 def make_state():
@@ -31,27 +43,40 @@ def make_state():
     }
 
 
-def make_stage(tmp_path, results):
-    """Create a QA stage using mocked tools."""
+def make_stage(
+    tmp_path,
+    results,
+    requirement_status=RequirementStatus.SATISFIED,
+    requirements_assessor=None,
+):
+    """Create a QA stage using mocked tools and requirements assessment."""
 
     calls = []
     reports = []
 
+    specification = EngineeringSpec(
+        title="Addition Utility",
+        objective="Implement integer addition.",
+        requirements=["Implement add()."],
+        technical_approach="Use Python.",
+        implementation_steps=["Implement the addition function."],
+        acceptance_criteria=["add(2, 3) returns 5."],
+    )
+
+    manifest = ImplementationManifest(
+        summary="Example",
+        files=[
+            {
+                "path": "main.py",
+                "operation": "create",
+                "sha256": "a" * 64,
+            }
+        ],
+    )
+
     def artifact_loader(state, runs_dir):
         calls.append("artifacts")
-        return (
-            ImplementationManifest(
-                summary="Example",
-                files=[
-                    {
-                        "path": "main.py",
-                        "operation": "create",
-                        "sha256": "a" * 64,
-                    }
-                ],
-            ),
-            tmp_path / "staging",
-        )
+        return manifest, tmp_path / "staging"
 
     def workspace_preparer(
         manifest,
@@ -66,6 +91,51 @@ def make_stage(tmp_path, results):
         calls.append(check_type.value)
         return results[check_type]
 
+    def specification_loader(state, runs_dir):
+        calls.append("specification")
+        return specification
+
+    def context_loader(state, runs_dir):
+        calls.append("context")
+        return QAImplementationContext(
+            files=[
+                VerifiedSourceFile(
+                    path="main.py",
+                    operation=FileOperation.CREATE,
+                    content="def add(a, b):\n    return a + b\n",
+                )
+            ]
+        )
+
+    def default_requirements_assessor(
+        task,
+        specification,
+        manifest,
+        implementation,
+        checks,
+    ):
+        calls.append("requirements")
+
+        return QARequirementAssessment(
+            findings=[
+                RequirementFinding(
+                    requirement_id="REQ-1",
+                    requirement="Implement add().",
+                    status=requirement_status,
+                    explanation="Reviewed the generated implementation.",
+                    implementation_files=["main.py"],
+                ),
+                RequirementFinding(
+                    requirement_id="AC-1",
+                    requirement="add(2, 3) returns 5.",
+                    status=requirement_status,
+                    explanation="Reviewed the addition behavior.",
+                    implementation_files=["main.py"],
+                ),
+            ],
+            overall_summary="Requirements assessment completed.",
+        )
+
     def report_writer(report, report_path):
         calls.append("report")
         reports.append(report)
@@ -75,6 +145,13 @@ def make_stage(tmp_path, results):
         workspace_preparer=workspace_preparer,
         test_executor=test_executor,
         report_writer=report_writer,
+        specification_loader=specification_loader,
+        context_loader=context_loader,
+        requirements_assessor=(
+            requirements_assessor
+            if requirements_assessor is not None
+            else default_requirements_assessor
+        ),
         runs_dir=tmp_path,
     )
 
@@ -117,6 +194,9 @@ def test_qa_pass(tmp_path):
         "workspace",
         "syntax",
         "unit_test",
+        "specification",
+        "context",
+        "requirements",
         "report",
     ]
 
@@ -202,3 +282,103 @@ def test_qa_rejects_existing_attempt(tmp_path):
     assert result.verdict == QAVerdict.BLOCKED
     assert "already exists" in result.summary
     assert calls == []
+
+def make_requirements_assessment(status):
+    """Create a complete synthetic requirements assessment."""
+
+    return QARequirementAssessment(
+        findings=[
+            RequirementFinding(
+                requirement_id="REQ-1",
+                requirement="Implement add().",
+                status=status,
+                explanation="Reviewed implementation.",
+                implementation_files=["main.py"],
+            ),
+            RequirementFinding(
+                requirement_id="AC-1",
+                requirement="add(2, 3) returns 5.",
+                status=status,
+                explanation="Reviewed test coverage.",
+                implementation_files=["main.py"],
+            ),
+        ],
+        overall_summary="Requirements evaluated.",
+    )
+
+
+def test_execution_pass_but_requirement_fails():
+    assessment = make_requirements_assessment(
+        RequirementStatus.NOT_SATISFIED
+    )
+
+    assert combine_qa_verdicts(
+        QAVerdict.PASS,
+        assessment,
+    ) == QAVerdict.FAIL
+
+
+def test_execution_pass_but_requirement_uncertain():
+    assessment = make_requirements_assessment(
+        RequirementStatus.UNCERTAIN
+    )
+
+    assert combine_qa_verdicts(
+        QAVerdict.PASS,
+        assessment,
+    ) == QAVerdict.BLOCKED
+
+
+def test_execution_pass_without_assessment_is_blocked():
+    assert combine_qa_verdicts(
+        QAVerdict.PASS,
+        None,
+    ) == QAVerdict.BLOCKED
+
+
+def test_execution_failure_remains_failure():
+    assert combine_qa_verdicts(
+        QAVerdict.FAIL,
+        None,
+    ) == QAVerdict.FAIL
+
+
+def test_execution_and_requirements_both_pass():
+    assessment = make_requirements_assessment(
+        RequirementStatus.SATISFIED
+    )
+
+    assert combine_qa_verdicts(
+        QAVerdict.PASS,
+        assessment,
+    ) == QAVerdict.PASS
+
+def test_qa_fails_when_requirements_not_satisfied(tmp_path):
+    stage, calls, reports = make_stage(
+        tmp_path,
+        {
+            QACheckType.SYNTAX: check(
+                QACheckType.SYNTAX,
+                QACheckStatus.PASSED,
+            ),
+            QACheckType.UNIT_TEST: check(
+                QACheckType.UNIT_TEST,
+                QACheckStatus.PASSED,
+            ),
+        },
+        requirement_status=RequirementStatus.NOT_SATISFIED,
+    )
+
+    result = stage(make_state())["qa_result"]
+
+    assert result.verdict == QAVerdict.FAIL
+    assert result.feedback is not None
+    assert result.feedback.recommendations
+
+    assert reports[0].requirements_assessment is not None
+    assert all(
+        finding.status == RequirementStatus.NOT_SATISFIED
+        for finding in reports[0].requirements_assessment.findings
+    )
+
+    assert "requirements" in calls

@@ -18,8 +18,15 @@ from harness.models import (
     QACheckType,
     StagedFile,
     FileOperation,
+    TaskRequest,
+    QARequirementAssessment,
+    RequirementStatus,
 )
 
+from harness.tools.qa_context import (
+    QAImplementationContext,
+    VerifiedSourceFile,
+)
 
 class FakeGroqClient:
     def __init__(self, content):
@@ -187,3 +194,213 @@ def test_rejects_unknown_file_reference():
         match="undeclared file"
     ):
         agent.generate(spec, manifest, checks, 0)
+
+def make_requirements_inputs():
+    """Create a task, specification, and generated implementation."""
+
+    task = TaskRequest(
+        task=(
+            "Implement a Python function that adds two integers "
+            "and include pytest tests."
+        ),
+    )
+
+    specification = EngineeringSpec(
+        title="Addition utility",
+        objective="Implement and test integer addition.",
+        requirements=[
+            "Implement a function add(a, b).",
+            "Support negative integers.",
+        ],
+        technical_approach="Use a Python function.",
+        implementation_steps=[
+            "Implement add().",
+            "Write pytest tests.",
+        ],
+        acceptance_criteria=[
+            "add(2, 3) returns 5.",
+            "All pytest tests pass.",
+        ],
+    )
+
+    implementation = QAImplementationContext(
+        files=[
+            VerifiedSourceFile(
+                path="calculator.py",
+                operation=FileOperation.CREATE,
+                content="def add(a, b):\n    return a + b\n",
+            ),
+            VerifiedSourceFile(
+                path="tests/test_calculator.py",
+                operation=FileOperation.CREATE,
+                content=(
+                    "from calculator import add\n\n"
+                    "def test_add():\n"
+                    "    assert add(2, 3) == 5\n"
+                ),
+            ),
+        ]
+    )
+
+    manifest = ImplementationManifest(
+        summary="Addition utility",
+        files=[
+            StagedFile(
+                path="calculator.py",
+                operation=FileOperation.CREATE,
+                sha256="a" * 64,
+            ),
+            StagedFile(
+                path="tests/test_calculator.py",
+                operation=FileOperation.CREATE,
+                sha256="b" * 64,
+            ),
+        ],
+    )
+
+    checks = [
+        QACheckResult(
+            name="syntax",
+            check_type=QACheckType.SYNTAX,
+            status=QACheckStatus.PASSED,
+            exit_code=0,
+        ),
+        QACheckResult(
+            name="unit_test",
+            check_type=QACheckType.UNIT_TEST,
+            status=QACheckStatus.PASSED,
+            exit_code=0,
+            stdout="1 passed",
+        ),
+    ]
+
+    return task, specification, manifest, implementation, checks
+
+
+def make_assessment_response(
+    specification: EngineeringSpec,
+    *,
+    omit_id: str | None = None,
+) -> str:
+    """Build a synthetic LLM response using expected requirement IDs."""
+
+    findings = []
+
+    for prefix, requirements in (
+        ("REQ", specification.requirements),
+        ("AC", specification.acceptance_criteria),
+    ):
+        for index, requirement in enumerate(requirements, start=1):
+            requirement_id = f"{prefix}-{index}"
+
+            if requirement_id == omit_id:
+                continue
+
+            findings.append(
+                {
+                    "requirement_id": requirement_id,
+                    "requirement": requirement,
+                    "status": "satisfied",
+                    "explanation": (
+                        "The implementation and tests were reviewed."
+                    ),
+                    "implementation_files": ["calculator.py"],
+                    "test_files": ["tests/test_calculator.py"],
+                    "missing_coverage": [],
+                }
+            )
+
+    return json.dumps(
+        {
+            "findings": findings,
+            "overall_summary": "Requirements review completed.",
+        }
+    )
+
+
+def test_assess_requirements_complete():
+    (
+        task,
+        specification,
+        manifest,
+        implementation,
+        checks,
+    ) = make_requirements_inputs()
+
+    client = FakeGroqClient(
+        make_assessment_response(specification)
+    )
+
+    agent = GroqQAAgent(client=client)
+
+    assessment = agent.assess_requirements(
+        task=task,
+        specification=specification,
+        manifest=manifest,
+        implementation=implementation,
+        checks=checks,
+    )
+
+    assert isinstance(assessment, QARequirementAssessment)
+    assert len(assessment.findings) == 4
+
+    assert {
+        finding.requirement_id
+        for finding in assessment.findings
+    } == {"REQ-1", "REQ-2", "AC-1", "AC-2"}
+
+    assert all(
+        finding.status == RequirementStatus.SATISFIED
+        for finding in assessment.findings
+    )
+
+    assert len(client.calls) == 1
+
+    request = client.calls[0]
+    system_prompt = request["messages"][0]["content"]
+
+    assert "Required JSON Schema" in system_prompt
+
+    context = json.loads(
+        request["messages"][1]["content"]
+    )
+
+    assert "original_task" in context
+    assert len(context["requirement_checklist"]) == 4
+    assert len(context["generated_files"]) == 2
+    assert len(context["execution_results"]) == 2
+
+
+def test_assess_requirements_rejects_missing_criterion():
+    (
+        task,
+        specification,
+        manifest,
+        implementation,
+        checks,
+    ) = make_requirements_inputs()
+
+    # The response is valid JSON and valid QARequirementAssessment,
+    # but it omits acceptance criterion AC-2.
+    client = FakeGroqClient(
+        make_assessment_response(
+            specification,
+            omit_id="AC-2",
+        )
+    )
+
+    agent = GroqQAAgent(client=client)
+
+    with pytest.raises(
+        QAGenerationError,
+        match="invalid or incomplete requirements assessment",
+    ):
+        agent.assess_requirements(
+            task=task,
+            specification=specification,
+            manifest=manifest,
+            implementation=implementation,
+            checks=checks,
+        )
+
+    assert len(client.calls) == 1
