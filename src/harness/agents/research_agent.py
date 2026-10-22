@@ -46,6 +46,19 @@ Rules:
 - Never claim that implementation or tests have been completed.
 
 Return ONLY valid JSON object conforming to the supplied schema.
+CRITICAL OUTPUT REQUIREMENTS:
+
+- Return one JSON object conforming exactly to the supplied schema.
+- specification.requirements must be an array of strings.
+- specification.implementation_steps must be an array of strings.
+- specification.acceptance_criteria must be an array of strings.
+- Do not use nested arrays in any of these fields.
+- Do not omit required fields.
+- Each implementation step must be one string, even if it describes
+  multiple related actions.
+- If status is "ready", specification must be present and complete.
+- If status is "blocked", explain why the specification cannot be produced.
+- Do not insert field names as array values or split JSON keys across fields.
 
 If blocked, specification may be null.
 Use source_ids only from the supplied evidence.

@@ -130,6 +130,48 @@ def copy_repository(
     walk(source)
 
 
+def make_workspace_readable(root: Path) -> None:
+    """Allow the unprivileged QA container to read the workspace.
+
+    Directories: 0755
+    Regular files: 0644
+
+    Intended only for a disposable, sanitized QA workspace.
+    """
+
+    for current_dir, directories, filenames in os.walk(
+        root,
+        followlinks=False,
+    ):
+        current = Path(current_dir)
+
+        os.chmod(current, 0o755)
+
+        for dirname in directories:
+            directory = current / dirname
+
+            if directory.is_symlink():
+                raise QAWorkspaceError(
+                    f"Symlink in QA workspace: {directory}"
+                )
+
+            os.chmod(directory, 0o755)
+
+        for filename in filenames:
+            file_path = current / filename
+
+            if file_path.is_symlink():
+                raise QAWorkspaceError(
+                    f"Symlink in QA workspace: {file_path}"
+                )
+
+            if not stat.S_ISREG(file_path.lstat().st_mode):
+                raise QAWorkspaceError(
+                    f"Unexpected QA workspace entry: {file_path}"
+                )
+
+            os.chmod(file_path, 0o644)
+
 def prepare_qa_workspace(
     manifest: ImplementationManifest,
     staging_dir: Path,
@@ -314,6 +356,8 @@ def prepare_qa_workspace(
             raise QAWorkspaceError(
                 "QA workspace appeared during preparation."
             )
+
+        make_workspace_readable(temporary)
 
         os.rename(temporary, workspace)
 

@@ -94,6 +94,11 @@ Review rules:
 16. Return findings in checklist order.
 
 Return ONLY valid JSON conforming to the supplied schema.
+The output must include BOTH:
+- findings: a complete array containing one finding per requirement
+  and acceptance criterion.
+- overall_summary: a non-empty string summarizing the assessment.
+
 Do not include Markdown code fences.
 """
 

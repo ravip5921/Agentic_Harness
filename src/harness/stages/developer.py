@@ -13,7 +13,9 @@ import os
 import re
 import shutil
 import tempfile
+import logging
 
+logger = logging.getLogger(__name__)
 from collections.abc import Callable
 from pathlib import Path
 
@@ -474,6 +476,11 @@ def make_developer_stage(
             )
 
         except (DevelopmentGenerationError, OSError, ValueError) as exc:
+            logger.exception(
+                "Development failed for run %s, attempt %d",
+                task.run_id,
+                revision_count,
+            )
             result = DevelopmentResult(
                 outcome=StageOutcome.FAILED,
                 summary="Development execution failed.",

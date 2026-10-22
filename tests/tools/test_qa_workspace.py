@@ -525,3 +525,27 @@ def test_rejects_oversized_repository_file(tmp_path):
         )
 
     assert not workspace.exists()
+
+def test_qa_workspace_has_readable_permissions(tmp_path):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    record = make_staged_file(
+        staging,
+        "tests/test_main.py",
+        "def test_example(): assert True\n",
+    )
+
+    workspace = tmp_path / "workspace"
+
+    prepare_qa_workspace(
+        manifest=make_manifest([record]),
+        staging_dir=staging,
+        workspace_dir=workspace,
+    )
+
+    test_file = workspace / "tests" / "test_main.py"
+
+    assert workspace.stat().st_mode & 0o005 == 0o005
+    assert (workspace / "tests").stat().st_mode & 0o005 == 0o005
+    assert test_file.stat().st_mode & 0o004 == 0o004

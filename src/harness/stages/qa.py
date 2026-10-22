@@ -523,7 +523,7 @@ def make_qa_stage(
                 if assessment_error:
                     summary += (
                         f" Requirements assessment unavailable: "
-                        f"{assessment_error}"
+                        f"{assessment_error, {verdict}}"
                     )
 
 
