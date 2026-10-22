@@ -19,11 +19,19 @@ from harness.models import RunStatus, TaskRequest
 
 from harness.stages.research import make_research_stage
 from harness.stages.developer import make_developer_stage
-from harness.stages.qa import qa
-from harness.stages.release import release
+from harness.stages.qa import (
+    qa,
+    make_qa_stage,
+)
+from harness.stages.release import (
+    release,
+    make_release_stage,
+)
 
 from harness.agents.research_agent import GroqResearchAgent
 from harness.agents.developer_agent import GroqDeveloperAgent
+from harness.agents.qa_agent import GroqQAAgent
+from harness.agents.release_agent import GroqReleaseAgent
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -121,11 +129,28 @@ def create_workflow(runs_dir: Path):
         runs_dir=runs_dir,
     )
 
+    qa_agent = GroqQAAgent()
+
+    qa_stage = make_qa_stage(
+        requirements_assessor=qa_agent.assess_requirements,
+        feedback_generator=qa_agent.generate,
+        runs_dir=runs_dir,
+    )
+
+    def generate_release_notes(task, manifest, qa_report):
+        return GroqReleaseAgent().generate(
+            task, manifest, qa_report
+        )
+
+    release_stage = make_release_stage(
+        release_generator=generate_release_notes,
+        runs_dir=runs_dir,
+    )
     return build_graph(
         research=research_stage,
         developer=developer_stage,
-        qa=qa,
-        release=release,
+        qa=qa_stage,
+        release=release_stage,
     )
 
 

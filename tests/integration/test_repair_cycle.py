@@ -40,6 +40,8 @@ from harness.models import (
     StageOutcome,
     TaskRequest,
     EngineeringSpec,
+    ReleaseAssessment,
+    ReleaseManifest,
 )
 
 from harness.stages.developer import make_developer_stage
@@ -52,6 +54,9 @@ from harness.stages.qa import (
 
 from harness.agents.developer_agent import GroqDeveloperAgent
 from harness.agents.qa_agent import GroqQAAgent
+from harness.stages.release import make_release_stage
+from harness.tools.release_artifacts import load_release_artifacts
+from harness.tools.release_workspace import prepare_release_workspace
 
 RUN_LIVE_GROQ = os.getenv("RUN_LIVE_GROQ") == "1"
 
@@ -246,7 +251,7 @@ def fake_requirements_assessor(
     )
 
 
-def make_release_stage(calls):
+def make_release_stage_placeholder(calls):
     """Placeholder Release that records whether it was reached."""
 
     def release(state):
@@ -298,7 +303,7 @@ def make_workflow(
 
         qa = wrapped_qa
 
-    release = make_release_stage(release_calls)
+    release = make_release_stage_placeholder(release_calls)
 
     return build_graph(
         research=research,
@@ -728,3 +733,200 @@ def test_live_groq_developer_repairs_previous_implementation():
 
     # Verify the revision differs from the known broken version.
     assert source != BAD_CODE
+
+
+def test_full_four_stage_workflow_reaches_staged(tmp_path):
+    """Verify Research -> Developer -> QA -> Release -> STAGED.
+
+    Uses real stage orchestration and artifact tools.
+    Groq generation and Docker execution are mocked.
+    """
+
+    calls = {
+        "developer": 0,
+        "qa_executor": 0,
+        "qa_assessor": 0,
+        "release_agent": 0,
+    }
+
+    # 1. Research: real specification artifact, fake generation.
+    research_stage = make_research_stage(tmp_path)
+
+    # 2. Developer: generate correct source and tests.
+    def developer_generator(
+        specification,
+        repository,
+        qa_feedback,
+        previous_implementation,
+    ):
+        calls["developer"] += 1
+
+        assert qa_feedback is None
+        assert previous_implementation is None
+
+        return DevelopmentAssessment(
+            status="ready",
+            summary="Implemented integer addition with pytest tests.",
+            files=make_generated_files(GOOD_CODE),
+        )
+
+    developer_stage = make_developer_stage(
+        generator=developer_generator,
+        runs_dir=tmp_path,
+    )
+
+    # 3. QA: use real artifact and workspace tools.
+    def qa_executor(check_type, workspace):
+        calls["qa_executor"] += 1
+        return fake_test_executor(check_type, workspace)
+
+    def qa_assessor(
+        task,
+        specification,
+        manifest,
+        implementation,
+        checks,
+    ):
+        calls["qa_assessor"] += 1
+
+        return fake_requirements_assessor(
+            task,
+            specification,
+            manifest,
+            implementation,
+            checks,
+        )
+
+    qa_stage = make_qa_stage(
+        test_executor=qa_executor,
+        requirements_assessor=qa_assessor,
+        runs_dir=tmp_path,
+    )
+
+    # 4. Release: real QA-approved artifact verification
+    # and real candidate preparation.
+    def release_generator(task, manifest, qa_report):
+        calls["release_agent"] += 1
+
+        assert qa_report.verdict == QAVerdict.PASS
+        assert len(manifest.files) == 2
+
+        return ReleaseAssessment(
+            summary="Addition utility prepared for review.",
+            changes=[
+                "CREATE calculator.py",
+                "CREATE tests/test_calculator.py",
+            ],
+            testing_summary=(
+                "Syntax checks and pytest tests passed. "
+                "Requirements assessment satisfied."
+            ),
+            limitations=[
+                "No deployment or repository merge performed."
+            ],
+            review_notes=[
+                "Review the release candidate before integration."
+            ],
+        )
+
+    release_stage = make_release_stage(
+        artifact_loader=load_release_artifacts,
+        workspace_preparer=prepare_release_workspace,
+        release_generator=release_generator,
+        runs_dir=tmp_path,
+    )
+
+    # 5. Build and execute the real LangGraph.
+    graph = build_graph(
+        research=research_stage,
+        developer=developer_stage,
+        qa=qa_stage,
+        release=release_stage,
+    )
+
+    task = TaskRequest(
+        task="Implement add(a, b) with pytest tests.",
+        max_dev_revisions=1,
+    )
+
+    result = graph.invoke({
+        "task": task,
+        "revision_count": 0,
+    })
+
+    # -------------------------------------------------
+    # Verify stage outcomes.
+    # -------------------------------------------------
+
+    assert result["research_result"].outcome == StageOutcome.COMPLETED
+    assert result["development_result"].outcome == StageOutcome.COMPLETED
+
+    assert result["qa_result"].verdict == QAVerdict.PASS
+
+    assert result["release_result"].status == ReleaseStatus.STAGED
+    assert result["status"] == RunStatus.STAGED
+
+    # No QA-triggered Developer retry should occur.
+    assert result["revision_count"] == 0
+
+    # Verify each agent/tool was reached.
+    assert calls == {
+        "developer": 1,
+        "qa_executor": 2,
+        "qa_assessor": 1,
+        "release_agent": 1,
+    }
+
+    # -------------------------------------------------
+    # Verify persisted artifacts.
+    # -------------------------------------------------
+
+    run_dir = tmp_path / task.run_id
+
+    spec_path = (
+        run_dir / "research" / "engineering_spec.json"
+    )
+
+    dev_dir = (
+        run_dir / "development" / "attempt-0"
+    )
+
+    qa_dir = (
+        run_dir / "qa" / "attempt-0"
+    )
+
+    release_dir = (
+        run_dir / "release" / "attempt-0"
+    )
+
+    candidate = release_dir / "candidate"
+
+    assert spec_path.exists()
+    assert (dev_dir / "manifest.json").exists()
+    assert (qa_dir / "test_report.json").exists()
+
+    assert (release_dir / "release_manifest.json").exists()
+    assert (release_dir / "release_assessment.json").exists()
+    assert (release_dir / "release_report.md").exists()
+
+    # -------------------------------------------------
+    # Verify actual release candidate contents.
+    # -------------------------------------------------
+
+    assert (candidate / "calculator.py").read_text() == GOOD_CODE
+
+    assert (
+        candidate / "tests" / "test_calculator.py"
+    ).read_text() == TEST_CODE
+
+    # Verify final ReleaseManifest.
+    release_manifest = ReleaseManifest.model_validate_json(
+        (release_dir / "release_manifest.json").read_text()
+    )
+
+    assert release_manifest.run_id == task.run_id
+    assert release_manifest.revision_count == 0
+    assert len(release_manifest.files) == 2
+
+    # The Release output points to the actual staged candidate.
+    assert Path(result["release_result"].change_ref) == candidate
