@@ -17,6 +17,7 @@ from harness.config import load_environment
 from harness.graph import build_graph
 from harness.models import RunStatus, TaskRequest
 from harness.tools.progress import ProgressRenderer
+from harness.tools.release_approval import prompt_release_approval
 
 from harness.stages.research import make_research_stage
 from harness.stages.developer import make_developer_stage
@@ -146,6 +147,7 @@ def create_workflow(runs_dir: Path):
     release_stage = make_release_stage(
         release_generator=generate_release_notes,
         runs_dir=runs_dir,
+        human_approver=prompt_release_approval,
     )
     return build_graph(
         research=research_stage,
@@ -236,7 +238,7 @@ def harness_cli(argv: list[str] | None = None) -> int:
 
         status = final_state["status"]
 
-        if status == RunStatus.STAGED:
+        if status in {RunStatus.STAGED, RunStatus.PR_CREATED}:
             return 0
 
         if status == RunStatus.BLOCKED:

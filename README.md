@@ -16,6 +16,37 @@ process environment take precedence. Loaded values are available throughout
 the process through environment access.
 You can also run the entry point with `python -m harness.main`.
 
+### Human release approval
+
+After QA passes, Release prepares the isolated candidate and report, prints
+their paths, and asks `Approve this release candidate? [y/N]`. Approval then
+offers `staged` (the default) or `pr` when `--repository` is supplied.
+
+- `staged` keeps the approved output in the run's release directory.
+- `pr` pushes a new `harness/<run-id>/attempt-N` branch and opens a draft
+  GitHub pull request against the target repository's current branch. Review
+  and merge that PR through your usual process. The original working tree
+  remains unchanged.
+- Rejection, interrupted input, or unavailable stdin blocks release and
+  preserves the candidate. There is no unattended approval flag.
+
+PR creation requires Git, the [GitHub CLI](https://cli.github.com/manual/gh_pr_create),
+`gh auth login`, a configured Git author (`user.name` and `user.email`), and push
+access to the target's GitHub `origin`. The target must be a clean repository
+root whose current branch matches that branch on origin. Commit/stash local
+work and synchronize before starting the run. Standalone runs support staging.
+
+The release directory records `release_decision.json` (choice, timestamp, and
+manifest digest), `release_result.json`, and the final outcome in
+`release_report.md`. If a push succeeds but PR creation fails, the result
+identifies the pushed branch so you can recover without repeating the push.
+Other failures also preserve the candidate and return a blocked result.
+
+Programmatic users of `make_release_stage` must supply a `human_approver`
+callback returning a `ReleaseDecision`; an absent callback blocks release.
+The CLI and default `release` entry point use the interactive prompt. This is
+a synchronous terminal gate; restarting a stopped process does not resume it.
+
 ### Model providers
 
 All four agents use the provider-independent `TextGenerator.complete()`

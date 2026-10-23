@@ -146,7 +146,7 @@ class ProgressRenderer:
             self._heading(node)
             status = getattr(result, field).value.upper()
             level = (
-                "success" if status in {"COMPLETED", "PASS", "STAGED"}
+                "success" if status in {"COMPLETED", "PASS", "STAGED", "PR_CREATED"}
                 else "warning" if status == "BLOCKED" else "failure"
             )
             name = "QA" if node == "qa" else node.capitalize()
@@ -157,7 +157,7 @@ class ProgressRenderer:
 
     def _finish(self, status) -> None:
         status = getattr(status, "value", status).upper()
-        level = "success" if status == "STAGED" else "warning" if status == "BLOCKED" else "failure"
+        level = "success" if status in {"STAGED", "PR_CREATED"} else "warning" if status == "BLOCKED" else "failure"
         self._stop()
         self.console.print()
         self._line(f"Workflow completed: {status}", level)

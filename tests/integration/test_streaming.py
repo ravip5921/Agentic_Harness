@@ -1,6 +1,7 @@
 """Exercise streaming with real stages and artifact tools, without Groq or Docker."""
 
 import json
+import hashlib
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
@@ -21,6 +22,7 @@ from harness.models import (
     ReleaseAssessment,
     ReleaseManifest,
     ReleaseStatus,
+    ReleaseDecision,
     RequirementFinding,
     RequirementStatus,
     ResearchAssessment,
@@ -178,7 +180,8 @@ def make_workflow(runs_dir, *, repair=False, always_bad=False,
         developer=make_developer_stage(generator=developer_agent.generate, runs_dir=runs_dir),
         qa=make_qa_stage(test_executor=execute_check,
                          requirements_assessor=assess_requirements, runs_dir=runs_dir),
-        release=make_release_stage(release_generator=generate_release, runs_dir=runs_dir),
+        release=make_release_stage(release_generator=generate_release, runs_dir=runs_dir,
+                                   human_approver=lambda **_: ReleaseDecision.KEEP_STAGED),
     )
     return workflow, calls
 
@@ -192,6 +195,12 @@ def normalized(value, runs_dir):
 def artifact_contents(runs_dir):
     def contents(path):
         text = path.read_text(encoding="utf-8").replace(str(runs_dir), "<runs>")
+        if path.name == "release_decision.json":
+            decision = json.loads(text)
+            manifest = path.with_name("release_manifest.json")
+            assert decision.pop("manifest_sha256") == hashlib.sha256(manifest.read_bytes()).hexdigest()
+            decision.pop("recorded_at")
+            return json.dumps(decision, sort_keys=True)
         if path.suffix == ".jsonl":
             records = [json.loads(line) for line in text.splitlines()]
             for record in records:

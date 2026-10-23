@@ -3,6 +3,8 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+import json
+import pytest
 
 from harness.models import (
     ImplementationManifest,
@@ -14,6 +16,7 @@ from harness.models import (
     ReleaseAssessment,
     ReleaseManifest,
     ReleaseStatus,
+    ReleaseDecision,
     TaskRequest,
 )
 
@@ -21,7 +24,8 @@ from harness.stages.release import make_release_stage
 from harness.tools.release_artifacts import ReleaseArtifactError
 
 
-def make_stage(tmp_path, generator=None, artifact_error=None):
+def make_stage(tmp_path, generator=None, artifact_error=None,
+               approver=lambda **_: ReleaseDecision.KEEP_STAGED, pr_creator=None):
     calls = []
 
     task = TaskRequest(task="Implement addition.")
@@ -100,6 +104,8 @@ def make_stage(tmp_path, generator=None, artifact_error=None):
         artifact_loader=artifact_loader,
         workspace_preparer=workspace_preparer,
         release_generator=release_generator,
+        human_approver=approver,
+        **({"pr_creator": pr_creator} if pr_creator is not None else {}),
         runs_dir=tmp_path,
     )
 
@@ -181,4 +187,88 @@ def test_invalid_qa_artifacts_block_release(tmp_path):
     assert result.status == ReleaseStatus.BLOCKED
     assert calls == ["validate"]
     assert result.change_ref is None
+
+
+@pytest.mark.parametrize("approver", [None, lambda **_: ReleaseDecision.REJECT,
+                                     lambda **_: "create_pr"])
+def test_missing_rejected_or_invalid_approval_never_publishes(tmp_path, approver):
+    def publish(**kwargs):
+        pytest.fail("Unapproved release must never publish")
+
+    stage, state, _ = make_stage(tmp_path, approver=approver, pr_creator=publish)
+    result = stage(state)["release_result"]
+    assert result.status == ReleaseStatus.BLOCKED
+    assert Path(result.change_ref).is_dir()
+
+
+def test_approval_sees_reviewable_artifacts_and_records_decision_before_pr(tmp_path):
+    def approve(*, task, candidate, report_path):
+        assert candidate.is_dir()
+        assert report_path.is_file()
+        assert (candidate.parent / "release_manifest.json").is_file()
+        return ReleaseDecision.CREATE_PR
+
+    def publish(*, task, artifacts, candidate, report_path, revision):
+        decision = json.loads((candidate.parent / "release_decision.json").read_text())
+        assert decision["decision"] == "create_pr"
+        assert decision["run_id"] == task.run_id
+        assert len(decision["manifest_sha256"]) == 64
+        return "https://github.com/example/project/pull/1"
+
+    stage, state, _ = make_stage(tmp_path, approver=approve, pr_creator=publish)
+    result = stage(state)["release_result"]
+    assert result.status == ReleaseStatus.PR_CREATED
+    assert result.change_ref.endswith("/pull/1")
+    attempt = tmp_path / state["task"].run_id / "release/attempt-0"
+    assert json.loads((attempt / "release_result.json").read_text())["status"] == "pr_created"
+    assert "Final status: pr_created" in (attempt / "release_report.md").read_text()
+
+
+def test_failed_pr_preserves_candidate_and_reports_failure(tmp_path):
+    def publish(**kwargs):
+        raise RuntimeError("Branch pushed; check GitHub before retrying.")
+
+    stage, state, _ = make_stage(tmp_path,
+        approver=lambda **_: ReleaseDecision.CREATE_PR, pr_creator=publish)
+    result = stage(state)["release_result"]
+    assert result.status == ReleaseStatus.BLOCKED
+    assert Path(result.change_ref).is_dir()
+    assert "Branch pushed" in result.errors[0]
+
+
+def test_failed_decision_persistence_never_publishes(tmp_path, monkeypatch):
+    import importlib
+    module = importlib.import_module("harness.stages.release")
+    original_write = module.write_text_atomic
+
+    def write(path, content):
+        if path.name == "release_decision.json":
+            raise OSError("Disk full")
+        original_write(path, content)
+
+    monkeypatch.setattr(module, "write_text_atomic", write)
+    stage, state, _ = make_stage(tmp_path,
+        approver=lambda **_: ReleaseDecision.CREATE_PR,
+        pr_creator=lambda **_: pytest.fail("Decision must be saved before publication"))
+    assert stage(state)["release_result"].status == ReleaseStatus.BLOCKED
+
+
+def test_audit_failure_after_publication_preserves_pr_url(tmp_path, monkeypatch):
+    import importlib
+    module = importlib.import_module("harness.stages.release")
+    original_write = module.write_text_atomic
+
+    def write(path, content):
+        if path.name == "release_result.json":
+            raise OSError("Disk full after publication")
+        original_write(path, content)
+
+    monkeypatch.setattr(module, "write_text_atomic", write)
+    stage, state, _ = make_stage(tmp_path,
+        approver=lambda **_: ReleaseDecision.CREATE_PR,
+        pr_creator=lambda **_: "https://github.com/example/project/pull/1")
+    result = stage(state)["release_result"]
+    assert result.status == ReleaseStatus.PR_CREATED
+    assert result.change_ref.endswith("/pull/1")
+    assert "metadata could not be saved" in result.errors[0]
 

@@ -20,6 +20,7 @@ from harness.models import (
     QAVerdict,
     ReleaseAssessment,
     ReleaseStatus,
+    ReleaseDecision,
     RequirementFinding,
     RequirementStatus,
     ResearchResult,
@@ -241,6 +242,7 @@ def make_release(tmp_path, manifest, *, fail_agent=False, block_validation=False
     stage = release_module.make_release_stage(
         artifact_loader=loader, workspace_preparer=prepare,
         release_generator=generate, runs_dir=tmp_path,
+        human_approver=lambda **_: ReleaseDecision.KEEP_STAGED,
     )
     return stage, {"task": task, "revision_count": 0}, calls
 
@@ -254,12 +256,13 @@ def test_release_fallback_events_remain_staged(tmp_path, manifest, capture_event
     names = [event["event"] for event in capture_events]
     assert "documentation_generation_completed" not in names
     assert names.index("documentation_fallback_started") < names.index("documentation_fallback_completed")
-    assert names[-1] == "persistence_completed"
+    assert names[-1] == "approval_recorded"
     assert "Private agent detail" not in str(capture_events)
     attempt = tmp_path / state["task"].run_id / "release/attempt-0"
     assert result.change_ref == str(attempt / "candidate")
     assert "Fallback: deterministic documentation" in (attempt / "release_report.md").read_text()
-    assert capture_events[-1]["data"]["manifest_path"] == str(attempt / "release_manifest.json")
+    persisted = next(event for event in capture_events if event["event"] == "persistence_completed")
+    assert persisted["data"]["manifest_path"] == str(attempt / "release_manifest.json")
 
 
 def test_release_block_emits_sanitized_reason(tmp_path, manifest, capture_events):
@@ -300,7 +303,11 @@ def test_release_progress_accepts_opaque_injected_context(
     assert "file_count" not in validated["data"]
 
 
-def test_streaming_release_fallback_preserves_result_and_artifacts(tmp_path, manifest):
+def test_streaming_release_fallback_preserves_result_and_artifacts(tmp_path, manifest, monkeypatch):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    monkeypatch.setattr(release_module, "datetime", SimpleNamespace(
+        now=lambda _: datetime(2026, 1, 1, tzinfo=timezone.utc)))
     stage, state, calls = make_release(tmp_path, manifest, fail_agent=True)
     direct_result = stage(state)["release_result"]
     attempt = tmp_path / state["task"].run_id / "release/attempt-0"

@@ -26,6 +26,7 @@ class QAVerdict(str, Enum):
 
 class ReleaseStatus(str, Enum):
     STAGED = "staged"
+    PR_CREATED = "pr_created"
     FAILED = "failed"
     BLOCKED = "blocked"
 
@@ -35,6 +36,13 @@ class RunStatus(str, Enum):
     FAILED = "failed"
     BLOCKED = "blocked"
     STAGED = "staged"
+    PR_CREATED = "pr_created"
+
+
+class ReleaseDecision(str, Enum):
+    KEEP_STAGED = "keep_staged"
+    CREATE_PR = "create_pr"
+    REJECT = "reject"
 
 
 class TaskRequest(StrictModel):

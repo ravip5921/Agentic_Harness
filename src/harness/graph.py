@@ -71,12 +71,14 @@ def route_qa(
 
 def route_release(
     state: HarnessState,
-) -> Literal["staged", "failed", "blocked"]:
+) -> Literal["staged", "pr_created", "failed", "blocked"]:
     """Route based on the Release stage result."""
     status = state["release_result"].status
 
     if status == ReleaseStatus.STAGED:
         return "staged"
+    if status == ReleaseStatus.PR_CREATED:
+        return "pr_created"
 
     return "blocked" if status == ReleaseStatus.BLOCKED else "failed"
 
@@ -118,6 +120,7 @@ def build_graph(
         ("failed", RunStatus.FAILED),
         ("blocked", RunStatus.BLOCKED),
         ("staged", RunStatus.STAGED),
+        ("pr_created", RunStatus.PR_CREATED),
     ]
 
     for name, status in terminal_statuses:

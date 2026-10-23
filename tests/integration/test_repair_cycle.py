@@ -33,6 +33,7 @@ from harness.models import (
     QAVerdict,
     ReleaseResult,
     ReleaseStatus,
+    ReleaseDecision,
     RequirementFinding,
     RequirementStatus,
     ResearchResult,
@@ -835,6 +836,7 @@ def test_full_four_stage_workflow_reaches_staged(tmp_path):
         artifact_loader=load_release_artifacts,
         workspace_preparer=prepare_release_workspace,
         release_generator=release_generator,
+        human_approver=lambda **_: ReleaseDecision.KEEP_STAGED,
         runs_dir=tmp_path,
     )
 

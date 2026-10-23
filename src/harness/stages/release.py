@@ -13,9 +13,12 @@ This stage never modifies the original target repository.
 """
 
 import logging
+import json
+import hashlib
 import os
 import re
 import tempfile
+from datetime import datetime, timezone
 
 from collections.abc import Callable
 from pathlib import Path
@@ -26,6 +29,7 @@ from harness.models import (
     ReleaseManifest,
     ReleaseResult,
     ReleaseStatus,
+    ReleaseDecision,
 )
 from harness.events import emit_event
 from harness.state import HarnessState
@@ -40,6 +44,8 @@ from harness.tools.release_workspace import (
     ReleaseWorkspaceError,
     prepare_release_workspace,
 )
+from harness.tools.release_approval import prompt_release_approval
+from harness.tools.release_pr import create_release_pr
 
 
 logger = logging.getLogger(__name__)
@@ -141,7 +147,7 @@ def render_release_report(
         f"{bullets(assessment.review_notes)}\n\n"
         "## Release Agent Status\n\n"
         f"{agent_status}\n\n"
-        "## Release Status\n\n"
+        "## Candidate Status\n\n"
         "STAGED — candidate prepared for review. "
         "No merge or deployment was performed.\n"
     )
@@ -178,8 +184,14 @@ def make_release_stage(
     workspace_preparer: Callable = prepare_release_workspace,
     release_generator: Callable | None = None,
     runs_dir: Path = Path("runs"),
+    human_approver: Callable | None = None,
+    pr_creator: Callable = create_release_pr,
 ):
-    """Create a LangGraph-compatible Release stage."""
+    """Create a Release stage; publication requires an explicit human decision.
+
+    The approver receives task, candidate and report_path as keyword arguments
+    and must return a ReleaseDecision. Without a callback, release is blocked.
+    """
 
     def release(state: HarnessState) -> dict:
         task = state.get("task")
@@ -447,20 +459,71 @@ def make_release_stage(
                 )
             }
 
-        return {
-            "release_result": ReleaseResult(
-                status=ReleaseStatus.STAGED,
-                summary=(
-                    "QA-approved implementation staged for review."
-                    if agent_error is None
-                    else (
-                        "QA-approved implementation staged with "
-                        "deterministic release documentation."
-                    )
-                ),
-                change_ref=str(candidate),
+        # Human authority is separate from the advisory Release Agent. Prepare
+        # reviewable artifacts first; never publish without an explicit choice.
+        emit_event("release", "approval_requested", "Release candidate ready for human approval")
+        try:
+            decision = (
+                human_approver(task=task, candidate=candidate, report_path=report_path)
+                if human_approver is not None else ReleaseDecision.REJECT
             )
-        }
+            if not isinstance(decision, ReleaseDecision):
+                raise ValueError("Human approver must return a ReleaseDecision.")
+            write_text_atomic(
+                release_dir / "release_decision.json",
+                json.dumps({
+                    "run_id": task.run_id, "revision_count": revision,
+                    "decision": decision.value,
+                    "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
+                }, indent=2),
+            )
+        except Exception as exc:
+            return {"release_result": ReleaseResult(
+                status=ReleaseStatus.BLOCKED, change_ref=str(candidate),
+                summary="Human approval could not be obtained or recorded; candidate preserved.",
+                errors=[type(exc).__name__],
+            )}
+
+        emit_event("release", "approval_recorded", f"Human release decision: {decision.value}")
+        result = ReleaseResult(
+            status=ReleaseStatus.STAGED, change_ref=str(candidate),
+            summary="Human-approved implementation kept staged.",
+        )
+        if decision == ReleaseDecision.REJECT:
+            result.status = ReleaseStatus.BLOCKED
+            result.summary = "Release was not approved; candidate preserved for review."
+        elif decision == ReleaseDecision.CREATE_PR:
+            try:
+                emit_event("release", "pr_creation_started", "Creating draft pull request", level="start")
+                result.change_ref = pr_creator(
+                    task=task, artifacts=artifacts, candidate=candidate,
+                    report_path=report_path, revision=revision,
+                )
+                result.status = ReleaseStatus.PR_CREATED
+                result.summary = "Human-approved implementation published as a draft pull request."
+                emit_event("release", "pr_creation_completed", "Draft pull request created", level="success")
+            except Exception as exc:
+                result.status = ReleaseStatus.BLOCKED
+                result.summary = "PR creation failed; staged candidate preserved."
+                result.errors = [str(exc)]
+                emit_event("release", "pr_creation_failed", result.summary, level="warning")
+
+        try:
+            write_text_atomic(release_dir / "release_result.json", result.model_dump_json(indent=2))
+            write_text_atomic(
+                report_path,
+                report_path.read_text(encoding="utf-8")
+                + f"\n## Human Decision\n\n{decision.value}\n\n"
+                + f"Final status: {result.status.value}\n\n{result.summary}\n\n"
+                + f"Change reference: {result.change_ref}\n",
+            )
+        except (OSError, ValueError) as exc:
+            # Publication may already have succeeded. Preserve its status and
+            # URL in the returned state so an audit write cannot hide a PR.
+            result.errors.append(f"Final release metadata could not be saved: {type(exc).__name__}")
+            emit_event("release", "result_persistence_failed", result.errors[-1], level="warning")
+        return {"release_result": result}
 
     return release
 
@@ -476,6 +539,7 @@ def release(state: HarnessState) -> dict:
 
     node = make_release_stage(
         release_generator=generate_notes,
+        human_approver=prompt_release_approval,
     )
 
     return node(state)

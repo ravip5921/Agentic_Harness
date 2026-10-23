@@ -20,6 +20,7 @@ from harness.models import (
     QAReport,
     QARequirementAssessment,
     QAVerdict,
+    ReleaseDecision,
     RequirementFinding,
     RequirementStatus,
     ResearchResult,
@@ -188,7 +189,8 @@ def run_line_drawer_graph(
         calls["feedback"].append(args)
         raise AssertionError("Environment blocks must not generate repair feedback.")
 
-    real_release = make_release_stage(runs_dir=runs_dir)
+    real_release = make_release_stage(runs_dir=runs_dir,
+                                     human_approver=lambda **_: ReleaseDecision.KEEP_STAGED)
 
     def release(state):
         calls["release"].append(state["qa_result"].verdict)

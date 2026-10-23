@@ -62,6 +62,7 @@ def test_custom_event_is_consumed_before_node_finishes():
 
 @pytest.mark.parametrize("verdict,release_status,expected_status,exit_code", [
     (QAVerdict.PASS, ReleaseStatus.STAGED, "staged", 0),
+    (QAVerdict.PASS, ReleaseStatus.PR_CREATED, "pr_created", 0),
     (QAVerdict.PASS, ReleaseStatus.FAILED, "failed", 1),
     (QAVerdict.BLOCKED, ReleaseStatus.STAGED, "blocked", 2),
     (QAVerdict.FAIL, ReleaseStatus.STAGED, "failed", 1),
