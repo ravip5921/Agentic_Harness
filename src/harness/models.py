@@ -135,6 +135,56 @@ class FileOperation(str, Enum):
     MODIFY = "modify"
 
 
+class PlannedFile(StrictModel):
+    """Metadata describing one file to generate."""
+
+    path: str = Field(min_length=1)
+    operation: FileOperation
+    description: str = Field(min_length=1)
+
+
+class DevelopmentPlan(StrictModel):
+    """Developer's file-generation plan and readiness assessment."""
+
+    status: Literal["ready", "blocked"]
+    reason: str = ""
+
+    summary: str = ""
+    files: list[PlannedFile] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_plan(self):
+        if self.status == "ready":
+            if not self.summary.strip():
+                raise ValueError(
+                    "A ready plan must contain a summary."
+                )
+            if not self.files:
+                raise ValueError(
+                    "A ready plan must contain planned files."
+                )
+
+        if self.status == "blocked":
+            if not self.reason.strip():
+                raise ValueError(
+                    "A blocked plan must explain why."
+                )
+            if self.files:
+                raise ValueError(
+                    "A blocked plan must not propose files."
+                )
+
+        return self
+
+        
+class GeneratedFileContent(StrictModel):
+    """Response from an individual file-generation request."""
+
+    content: str = Field(min_length=1)
+
+
 class GeneratedFile(StrictModel):
     """A single file proposed by the Developer Agent."""
 
