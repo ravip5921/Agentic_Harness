@@ -1,0 +1,26 @@
+Extend the supplied integration-demo repository with a GitHub connector that
+lists users who are members of one configured GitHub organization.
+
+Preserve the existing integrations.base.Connector and User contract and the
+baseline tests. Implement GitHubConnector in src/integrations/github.py as a
+Connector subclass. Its constructor accepts organization: str, token: str,
+and timeout: float = 10.0. list_users() returns list[User], mapping GitHub id
+to a string, login to username, and html_url to profile_url.
+
+Use the GitHub REST endpoint GET https://api.github.com/orgs/{org}/members
+with per_page=100. Follow pagination until all pages have been retrieved.
+Send a Bearer authorization header and the GitHub JSON Accept header. Apply
+the configured timeout to every HTTP request. Use Python's standard library
+HTTP facilities so the implementation needs no runtime dependencies.
+Raise on HTTP errors (including 401, 403, 404, 429), transport errors, and
+malformed responses; never silently return partial results. Do not log tokens.
+Validate that organization and token are nonempty. Return [] for an empty
+organization membership response. This task concerns members visible to the
+token, not every GitHub account or guaranteed visibility of private members.
+
+Add deterministic pytest tests using mocked HTTP, with no GitHub credentials
+or network calls. Cover mapping, empty results, pagination, authorization and
+Accept headers, configured timeout, HTTP and transport errors, malformed
+responses, and invalid constructor arguments. Retain the baseline tests.
+Include usage documentation with placeholder credentials only. Keep changes
+focused on this connector; do not replace the project or alter its base API.
