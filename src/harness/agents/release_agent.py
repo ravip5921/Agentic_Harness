@@ -17,6 +17,7 @@ import os
 
 from groq import Groq
 from pydantic import ValidationError
+from harness.tools.groq_rate_limit import call_groq
 
 from harness.models import (
     TaskRequest,
@@ -91,7 +92,7 @@ class GroqReleaseAgent:
             else Groq(
                 api_key=os.environ["GROQ_API_KEY"],
                 timeout=90.0,
-                max_retries=1,
+                max_retries=0,
             )
         )
 
@@ -143,7 +144,8 @@ class GroqReleaseAgent:
         }
 
         try:
-            response = self.client.chat.completions.create(
+            response = call_groq(
+                "release", self.client.chat.completions.create,
                 model=self.model,
                 temperature=0,
                 response_format={"type": "json_object"},

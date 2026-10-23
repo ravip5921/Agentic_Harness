@@ -13,6 +13,7 @@ from harness.models import (
     TaskRequest,
 )
 from harness.tools.repository import RepositoryContext
+from harness.tools.groq_rate_limit import call_groq
 
 
 SYSTEM_PROMPT = """
@@ -83,7 +84,7 @@ class GroqResearchAgent:
         self.client = Groq(
             api_key=os.getenv("GROQ_API_KEY"),
             timeout=60.0,
-            max_retries=1,
+            max_retries=0,
         )
 
     def generate(
@@ -118,7 +119,8 @@ class GroqResearchAgent:
         }
 
         try:
-            response = self.client.chat.completions.create(
+            response = call_groq(
+                "research", self.client.chat.completions.create,
                 model=self.model,
                 temperature=0,
                 response_format={"type": "json_object"},

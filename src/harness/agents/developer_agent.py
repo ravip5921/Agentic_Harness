@@ -14,6 +14,7 @@ from groq import Groq
 from pydantic import ValidationError
 
 from harness.events import emit_event
+from harness.tools.groq_rate_limit import call_groq
 from harness.models import (
     DevelopmentAssessment,
     EngineeringSpec,
@@ -300,7 +301,7 @@ class GroqDeveloperAgent:
         self.client = client or Groq(
             api_key=os.environ["GROQ_API_KEY"],
             timeout=90.0,
-            max_retries=1,
+            max_retries=0,
         )
 
     def plan(
@@ -335,7 +336,8 @@ class GroqDeveloperAgent:
             "Planning implementation", level="start",
         )
         try:
-            response = self.client.chat.completions.create(
+            response = call_groq(
+                "developer", self.client.chat.completions.create,
                 model=self.model,
                 temperature=0,
                 response_format={"type": "json_object"},
@@ -447,7 +449,8 @@ class GroqDeveloperAgent:
             data={"path": planned_file.path}, level="start",
         )
         try:
-            response = self.client.chat.completions.create(
+            response = call_groq(
+                "developer", self.client.chat.completions.create,
                 model=self.model,
                 temperature=0,
                 messages=[

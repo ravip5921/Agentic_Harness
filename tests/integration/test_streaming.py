@@ -59,9 +59,10 @@ class RecordingProgress:
 
 
 def make_workflow(runs_dir, *, repair=False, always_bad=False,
-                  release_failure=False, observe=lambda _stage: None):
+                  release_failure=False, observe=lambda _stage: None,
+                  rate_limit_failures=0, requested_tokens=6489):
     """Mock generation/controlled execution while retaining every trusted tool."""
-    calls = {"planning": [], "files": [], "checks": [], "release": 0}
+    calls = {"planning": [], "files": [], "checks": [], "release": 0, "rate_limit_errors": 0}
     spec = EngineeringSpec(
         title="Addition utility",
         objective="Implement integer addition.",
@@ -77,6 +78,21 @@ def make_workflow(runs_dir, *, repair=False, always_bad=False,
         return ResearchAssessment(status="ready", specification=spec)
 
     def create_completion(**kwargs):
+        nonlocal rate_limit_failures
+        if rate_limit_failures:
+            import httpx
+            from groq import RateLimitError
+
+            rate_limit_failures -= 1
+            calls["rate_limit_errors"] += 1
+            message = (
+                "tokens per minute (TPM): Limit 8000, Used 2318, "
+                f"Requested {requested_tokens}. Please try again in 6.0525s."
+            )
+            raise RateLimitError(message, response=httpx.Response(
+                429, request=httpx.Request("POST", "https://api.groq.com/test"),
+            ), body={"message": message})
+
         context = json.loads(kwargs["messages"][-1]["content"])
         observe("developer")
 
@@ -342,3 +358,72 @@ def test_cli_displays_live_progress_and_preserves_final_summary(tmp_path, monkey
     assert "test_report.json" in final_output
     assert str(tmp_path / task.run_id / "release" / "attempt-0" / "candidate") in final_output
     assert "\x1b[" not in live_output + final_output
+
+
+def test_groq_429_wait_is_streamed_and_request_recovers(tmp_path, monkeypatch):
+    from io import StringIO
+
+    from rich.console import Console
+
+    from harness.cli import stream_workflow
+    from harness.tools.progress import ProgressRenderer
+
+    received = Event()
+    waits = []
+    output = StringIO()
+
+    class RateLimitRenderer(ProgressRenderer):
+        def event(self, payload):
+            super().event(payload)
+            if payload["event"] == "groq_rate_limit_wait_started":
+                received.set()
+
+    def fake_sleep(seconds):
+        # Hold the mocked retry wait until the CLI has displayed its wait event.
+        assert received.wait(timeout=5), "429 retry wait was not streamed while waiting"
+        received.clear()
+        waits.append(seconds)
+
+    monkeypatch.setattr("harness.tools.groq_rate_limit.sleep", fake_sleep)
+    graph, calls = make_workflow(tmp_path, rate_limit_failures=2)
+    task = TaskRequest(task="Implement addition.")
+    with RateLimitRenderer(Console(file=output, force_terminal=False, width=120)) as renderer:
+        result = stream_workflow(graph, {"task": task, "revision_count": 0}, renderer)
+        renderer.finish(result["status"])
+
+    assert waits == [pytest.approx(8.0525), pytest.approx(8.0525)]
+    assert calls["rate_limit_errors"] == 2
+    assert len(calls["planning"]) == 1
+    assert len(calls["files"]) == 2
+    assert result["status"] == RunStatus.STAGED
+    assert result["release_result"].change_ref == str(tmp_path / task.run_id / "release/attempt-0/candidate")
+    assert set(result) <= HarnessState.__annotations__.keys()
+    text = output.getvalue()
+    assert text.count("waiting 8.0525s before retry") == 2
+    assert text.count("Groq rate limit cleared") == 1
+    assert "Workflow completed: STAGED" in text
+
+
+def test_oversized_request_exhaustion_fails_cli_gracefully(tmp_path, monkeypatch, capsys):
+    import harness.cli as cli
+
+    waits = []
+    monkeypatch.setattr("harness.tools.groq_rate_limit.sleep", waits.append)
+    task = TaskRequest(task="Implement addition.")
+    workflow, calls = make_workflow(tmp_path, rate_limit_failures=3, requested_tokens=9000)
+    monkeypatch.setattr(cli, "create_task", lambda _args: task)
+    monkeypatch.setattr(cli, "create_workflow", lambda _runs_dir: workflow)
+
+    assert cli.harness_cli([task.task, "--runs-dir", str(tmp_path)]) == 1
+
+    output = capsys.readouterr().out
+    assert calls["rate_limit_errors"] == 3
+    assert waits == [pytest.approx(8.0525), pytest.approx(8.0525)]
+    assert "stopping after 2 retries" in output
+    assert "Requested 9000 tokens exceeds the TPM limit 8000" in output
+    assert "Workflow completed: FAILED" in output
+    assert "=== Agentic Harness Result ===" in output
+    assert "Status: failed" in output
+    assert "QA: Not executed" in output
+    assert "Release: Not executed" in output
+    assert not (tmp_path / task.run_id / "development/attempt-0").exists()

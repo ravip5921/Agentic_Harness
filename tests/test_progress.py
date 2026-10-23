@@ -100,3 +100,44 @@ def test_renderer_failure_does_not_escape_or_prevent_cleanup():
     renderer.finish(RunStatus.STAGED)
     renderer.__exit__(None, None, None)
     console.status.return_value.stop.assert_called_once()
+
+
+def test_interactive_rate_limit_wait_counts_down_without_duplicate_messages(monkeypatch):
+    console = Mock(is_interactive=True)
+    monkeypatch.setattr("harness.tools.progress.monotonic", lambda: 100)
+    with ProgressRenderer(console) as renderer:
+        renderer.event({"stage": "developer", "event": "groq_rate_limit_wait_started",
+                        "message": "Groq rate limit (429); waiting 60s before retry 1/5",
+                        "level": "start", "data": {"seconds": 60}})
+        countdown = console.status.call_args.args[0]
+        assert countdown.__rich__().plain == "  Groq rate limit: 60s remaining"
+        assert countdown.__rich__().style == "yellow"
+        assert console.status.call_args.kwargs["spinner_style"] == "yellow"
+        assert console.print.call_count == 1  # Only the stage heading is permanent.
+        monkeypatch.setattr("harness.tools.progress.monotonic", lambda: 143.2)
+        assert countdown.__rich__().plain == "  Groq rate limit: 17s remaining"
+        monkeypatch.setattr("harness.tools.progress.monotonic", lambda: 170)
+        assert countdown.__rich__().plain == "  Groq rate limit: 0s remaining"
+        renderer.event({"stage": "developer", "event": "groq_rate_limit_recovered",
+                        "message": "Groq rate limit cleared", "level": "info", "data": {"retries": 1}})
+        console.status.return_value.stop.assert_called_once()
+        assert console.print.call_count == 3
+
+
+def test_redirected_rate_limit_wait_shows_duration_and_retry_without_animation():
+    output = StringIO()
+    console = Console(file=output, force_terminal=False)
+    with ProgressRenderer(console) as renderer:
+        renderer.event({"stage": "qa", "event": "groq_rate_limit_wait_started",
+                        "message": "Groq rate limit (429); waiting 60s before retry 1/5",
+                        "level": "start", "data": {"seconds": 60}})
+        renderer.event({"stage": "qa", "event": "groq_rate_limit_retrying",
+                        "message": "Retrying Groq request (1/5)", "level": "start", "data": {"seconds": 60}})
+        renderer.event({"stage": "qa", "event": "groq_rate_limit_recovered",
+                        "message": "Groq rate limit cleared", "level": "info", "data": {"retries": 1}})
+    text = output.getvalue()
+    assert text.count("waiting 60s") == 1
+    assert text.count("Retrying Groq request (1/5)") == 1
+    assert text.count("Groq rate limit cleared") == 1
+    assert "remaining" not in text
+    assert "\x1b" not in text

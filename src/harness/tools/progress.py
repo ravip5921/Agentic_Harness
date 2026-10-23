@@ -1,6 +1,8 @@
 """Rich terminal presentation for informational events and graph updates."""
 
 import re
+from math import ceil
+from time import monotonic
 from collections.abc import Callable
 
 from rich.console import Console
@@ -16,6 +18,17 @@ _CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 def _text(value: str) -> str:
     return " ".join(_CONTROLS.sub(" ", _ANSI.sub("", value)).split())[:240]
+
+
+class _RetryCountdown:
+    """Rich refreshes the remaining time without extra stream events or lines."""
+
+    def __init__(self, seconds: float):
+        self.deadline = monotonic() + seconds
+
+    def __rich__(self) -> Text:
+        remaining = max(0, ceil(self.deadline - monotonic()))
+        return Text(f"  Groq rate limit: {remaining}s remaining", style="yellow")
 
 
 class ProgressRenderer:
@@ -67,7 +80,7 @@ class ProgressRenderer:
             self.console.print(Text(f"\n● {_text(stage).upper()}", style="bold cyan"))
             self._stage = stage
 
-    def _line(self, message: str, level: str) -> None:
+    def _line(self, message: str, level: str, seconds: float | None = None) -> None:
         self._stop()
         symbol, style = {
             "start": ("→", "cyan"),
@@ -76,10 +89,15 @@ class ProgressRenderer:
             "warning": ("!", "yellow"),
             "failure": ("✗", "red"),
             "retry": ("↻", "yellow"),
+            "wait": ("◷", "yellow"),
         }.get(level, ("•", "default"))
         line = Text(f"  {symbol} {_text(message)}", style=style)
-        if level == "start" and self.console.is_interactive:
-            self._status = self.console.status(Text(f"  {_text(message)}", style=style), spinner="dots")
+        if level in {"start", "wait"} and self.console.is_interactive:
+            current = (
+                _RetryCountdown(seconds) if seconds is not None
+                else Text(f"  {_text(message)}", style=style)
+            )
+            self._status = self.console.status(current, spinner="dots", spinner_style=style)
             self._pending_line = line
             self._status.start()
         else:
@@ -90,7 +108,12 @@ class ProgressRenderer:
 
     def _event(self, event: ProgressEvent) -> None:
         self._heading(event["stage"])
-        self._line(event["message"], event.get("level", "info"))
+        if event["event"] == "groq_rate_limit_wait_started":
+            self._line(event["message"], "wait", event["data"]["seconds"])
+        elif event["event"] == "groq_rate_limit_retrying":
+            self._line(event["message"], "wait")
+        else:
+            self._line(event["message"], event.get("level", "info"))
 
     def update(self, update: dict, state: dict) -> None:
         self._safe(self._update, update, state)
