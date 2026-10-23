@@ -32,7 +32,10 @@ from harness.agents.research_agent import (
     GroqResearchAgent,
     ResearchGenerationError,
 )
-
+from harness.tools.discovery import (
+    discover_documentation,
+    DiscoveryError,
+)
 
 def render_spec(spec) -> str:
     """Render a validated engineering specification as Markdown."""
@@ -153,6 +156,7 @@ def make_research_stage(
     generator: Callable,
     repository_reader: Callable = inspect_repository,
     evidence_reader: Callable = retrieve_evidence,
+    documentation_discoverer: Callable = discover_documentation,
     runs_dir: Path = Path("runs"),
 ):
     """Create a Research node with injected dependencies.
@@ -192,10 +196,9 @@ def make_research_stage(
                         "Repository inspection completed",
                     )
 
-            # Documentation URLs are supplied as task data.
-            urls = task.parameters.get(
-                "documentation_urls", []
-            )
+                        
+            # 1. Read explicitly supplied documentation URLs.
+            urls = task.parameters.get("documentation_urls", [])
 
             if not isinstance(urls, list) or not all(
                 isinstance(url, str) for url in urls
@@ -204,30 +207,132 @@ def make_research_stage(
                     "documentation_urls must be a list of strings."
                 )
 
-            emit_event(
-                "research", "evidence_retrieval_started",
-                "Retrieving supplied documentation",
-                data={"supplied_source_count": len(urls)}, level="start",
+            # 2. Determine whether to run automatic discovery.
+            #
+            # Default: discover when the task appears to involve an
+            # external API/integration and has no supplied documentation.
+            #
+            # Users can override this with:
+            # parameters={"discover_documentation": True/False}
+            discovery_setting = task.parameters.get(
+                "discover_documentation"
             )
-            evidence = evidence_reader(
-                urls,
-            )
-            if isinstance(evidence, list):
-                emit_event(
-                    "research", "evidence_retrieval_completed",
-                    f"Documentation retrieved: {len(evidence)} sources",
-                    data={"source_count": len(evidence)}, level="success",
+
+            if discovery_setting is not None and not isinstance(
+                discovery_setting, bool
+            ):
+                raise ValueError(
+                    "discover_documentation must be a boolean."
+                )
+
+            if discovery_setting is None:
+                task_text = task.task.lower()
+
+                discovery_enabled = (
+                    not urls
+                    and any(
+                        term in task_text
+                        for term in (
+                            "api",
+                            "integration",
+                            "sdk",
+                            "rest client",
+                            "http client",
+                        )
+                    )
                 )
             else:
+                discovery_enabled = discovery_setting
+
+            domains = task.parameters.get(
+                "documentation_domains", []
+            )
+
+            if not isinstance(domains, list) or not all(
+                isinstance(domain, str) for domain in domains
+            ):
+                raise ValueError(
+                    "documentation_domains must be a list of strings."
+                )
+
+            # 3. Discover candidate documentation URLs.
+            if discovery_enabled:
                 emit_event(
-                    "research", "evidence_retrieval_completed",
-                    "Documentation retrieval completed",
+                    "research",
+                    "documentation_discovery_started",
+                    "Searching for technical documentation",
+                    level="start",
+                )
+
+                try:
+                    discovered_urls = documentation_discoverer(
+                        task.task,
+                        domains=domains,
+                    )
+                except DiscoveryError:
+                    # A search-service failure should not necessarily
+                    # prevent research from using explicitly supplied URLs.
+                    if not urls:
+                        raise
+                    discovered_urls = []
+
+                urls = list(
+                    dict.fromkeys(urls + discovered_urls)
+                )
+
+                emit_event(
+                    "research",
+                    "documentation_discovery_completed",
+                    f"Discovered {len(discovered_urls)} candidate sources",
+                    data={
+                        "discovered_count": len(discovered_urls),
+                    },
+                    level="success",
+                )
+
+            # 4. Retrieve actual documentation evidence.
+            emit_event(
+                "research",
+                "evidence_retrieval_started",
+                "Retrieving documentation",
+                data={"source_count": len(urls)},
+                level="start",
+            )
+
+            evidence = []
+
+            for url in urls:
+                try:
+                    sources = evidence_reader([url])
+                    evidence.extend(sources)
+                except EvidenceError as exc:
+                    emit_event(
+                        "research",
+                        "evidence_source_skipped",
+                        f"Skipped documentation source: {type(exc).__name__}",
+                        level="warning",
+                    )
+
+            if discovery_enabled and not evidence:
+                raise EvidenceError(
+                    "No usable documentation evidence could be retrieved."
                 )
 
             emit_event(
-                "research", "specification_generation_started",
-                "Generating engineering specification", level="start",
+                "research",
+                "evidence_retrieval_completed",
+                f"Documentation retrieved: {len(evidence)} sources",
+                data={"source_count": len(evidence)},
+                level="success",
             )
+            # Renumber IDs AFTER collecting all successful sources.
+            evidence = [
+                source.model_copy(
+                    update={"source_id": f"source-{index}"}
+                )
+                for index, source in enumerate(evidence, start=1)
+            ]
+            
             assessment = generator(
                 task,
                 repository,
@@ -283,6 +388,7 @@ def make_research_stage(
             FileNotFoundError,
             RepositoryError,
             EvidenceError,
+            DiscoveryError,
             ValueError,
         ) as exc:
             emit_event(
