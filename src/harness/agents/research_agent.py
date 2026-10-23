@@ -4,7 +4,6 @@
 import json
 import os
 
-
 from groq import Groq
 
 from harness.models import (
@@ -14,6 +13,7 @@ from harness.models import (
 )
 from harness.tools.repository import RepositoryContext
 from harness.tools.groq_rate_limit import call_groq
+from harness.tools.structured_output import strict_response_format
 
 
 SYSTEM_PROMPT = """
@@ -123,7 +123,9 @@ class GroqResearchAgent:
                 "research", self.client.chat.completions.create,
                 model=self.model,
                 temperature=0,
-                response_format={"type": "json_object"},
+                response_format=strict_response_format(
+                    "research_assessment", schema
+                ),
                 messages=[
                     {
                         "role": "system",

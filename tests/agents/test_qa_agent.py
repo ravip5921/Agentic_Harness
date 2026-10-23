@@ -136,6 +136,9 @@ def test_generate_structured_qa_feedback():
 
     request = client.calls[0]
 
+    assert request["response_format"]["type"] == "json_schema"
+    assert request["response_format"]["json_schema"]["strict"] is True
+    assert request["response_format"]["json_schema"]["name"] == "qa_feedback"
     assert "Required JSON Schema" in request["messages"][0]["content"]
 
     context = json.loads(
@@ -359,6 +362,9 @@ def test_assess_requirements_complete():
     request = client.calls[0]
     system_prompt = request["messages"][0]["content"]
 
+    assert request["response_format"]["type"] == "json_schema"
+    assert request["response_format"]["json_schema"]["strict"] is True
+    assert request["response_format"]["json_schema"]["name"] == "qa_requirement_assessment"
     assert "Required JSON Schema" in system_prompt
 
     context = json.loads(

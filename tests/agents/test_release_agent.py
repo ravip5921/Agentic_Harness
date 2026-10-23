@@ -120,6 +120,9 @@ def test_release_agent_generates_assessment():
 
     request = client.calls[0]
 
+    assert request["response_format"]["type"] == "json_schema"
+    assert request["response_format"]["json_schema"]["strict"] is True
+    assert request["response_format"]["json_schema"]["name"] == "release_assessment"
     assert request["model"] == "test-model"
     assert "Required JSON Schema" in (
         request["messages"][0]["content"]

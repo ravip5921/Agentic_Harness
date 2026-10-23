@@ -18,6 +18,7 @@ import os
 from groq import Groq
 from pydantic import ValidationError
 from harness.tools.groq_rate_limit import call_groq
+from harness.tools.structured_output import strict_response_format
 
 from harness.models import (
     TaskRequest,
@@ -148,7 +149,9 @@ class GroqReleaseAgent:
                 "release", self.client.chat.completions.create,
                 model=self.model,
                 temperature=0,
-                response_format={"type": "json_object"},
+                response_format=strict_response_format(
+                    "release_assessment", schema
+                ),
                 messages=[
                     {
                         "role": "system",

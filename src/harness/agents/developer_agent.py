@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from harness.events import emit_event
 from harness.tools.groq_rate_limit import call_groq
+from harness.tools.structured_output import strict_response_format
 from harness.models import (
     DevelopmentAssessment,
     EngineeringSpec,
@@ -360,7 +361,9 @@ class GroqDeveloperAgent:
                 "developer", self.client.chat.completions.create,
                 model=self.model,
                 temperature=0,
-                response_format={"type": "json_object"},
+                response_format=strict_response_format(
+                    "development_plan", schema
+                ),
                 messages=[
                     {
                         "role": "system",

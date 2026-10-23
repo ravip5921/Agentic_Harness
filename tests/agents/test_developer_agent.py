@@ -207,10 +207,12 @@ def test_successful_generation_full_flow():
     assert len(client.calls) == 3
     assert len(client.responses) == 0
 
-    # Planning uses JSON mode.
-    assert client.calls[0]["response_format"] == {
-        "type": "json_object"
-    }
+    # Planning uses strict schema-constrained JSON.
+    response_format = client.calls[0]["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    assert response_format["json_schema"]["name"] == "development_plan"
+    assert "files" in response_format["json_schema"]["schema"]["properties"]
 
     # File generation uses raw text.
     assert "response_format" not in client.calls[1]

@@ -69,6 +69,15 @@ RUN_LIVE_GROQ=0 python -m pytest -q tests/test_events.py tests/test_progress.py 
 
 Existing live Groq tests remain opt-in with `RUN_LIVE_GROQ=1`.
 
+Structured agent responses use a shared strict JSON Schema helper in
+`src/harness/tools/structured_output.py`. This covers Research, Developer
+planning, QA requirements and feedback, and Release documentation. The
+configured `GROQ_MODEL` must support strict structured outputs (including the
+default `openai/gpt-oss-20b`). Nested object fields are required and extra
+properties are forbidden; nullable fields retain their null option. Local
+Pydantic validation still enforces application rules. Developer file
+generation continues to return plain source text.
+
 ### QA dependencies
 
 Build the Python QA image before running tasks that need containerized QA:
