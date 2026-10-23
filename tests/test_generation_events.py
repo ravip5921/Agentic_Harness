@@ -173,7 +173,9 @@ def developer_client(responses, captured_events):
         calls.append(kwargs)
         # A start event must already be available when each request begins.
         expected = "implementation_planning_started" if len(calls) == 1 else "file_generation_started"
-        assert captured_events[-1]["event"] == expected
+        operations = [event for event in captured_events if not event["event"].startswith("llm_")]
+        assert operations[-1]["event"] == expected
+        assert captured_events[-1]["event"] == "llm_request_started"
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=next(pending)))])
 
     return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))), calls
@@ -193,6 +195,7 @@ def test_developer_events_follow_two_phase_validation_without_source_output(capt
 
     assessment = GroqDeveloperAgent(client=client).generate(specification())
 
+    captured_events = [event for event in captured_events if not event["event"].startswith("llm_")]
     assert [event["event"] for event in captured_events] == [
         "implementation_planning_started", "file_plan_validated",
         "file_generation_started", "file_generation_completed",
@@ -213,7 +216,8 @@ def test_invalid_file_response_does_not_emit_completion(captured_events, respons
         GroqDeveloperAgent(client=client).generate(specification())
 
     assert len(calls) == 2
-    assert captured_events[-1]["event"] == "file_generation_started"
+    operations = [event for event in captured_events if not event["event"].startswith("llm_")]
+    assert operations[-1]["event"] == "file_generation_started"
     assert not any(event["event"] == "file_generation_completed" for event in captured_events)
 
 
@@ -224,7 +228,7 @@ def test_invalid_plan_does_not_emit_validation_or_generate_files(captured_events
         GroqDeveloperAgent(client=client).generate(specification())
 
     assert len(calls) == 1
-    assert [event["event"] for event in captured_events] == ["implementation_planning_started"]
+    assert [event["event"] for event in captured_events if not event["event"].startswith("llm_")] == ["implementation_planning_started"]
 
 
 def test_developer_retry_metadata_and_staging_match_real_artifacts(tmp_path, captured_events):

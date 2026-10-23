@@ -22,8 +22,7 @@ def test_research_uses_strict_schema_and_keeps_semantic_validation(
     client = SimpleNamespace(chat=SimpleNamespace(
         completions=SimpleNamespace(create=create),
     ))
-    monkeypatch.setattr("harness.agents.research_agent.Groq", lambda **kwargs: client)
-    agent = GroqResearchAgent(model="test-model")
+    agent = GroqResearchAgent(model="test-model", client=client)
     task = TaskRequest(task="Example task")
 
     if valid:

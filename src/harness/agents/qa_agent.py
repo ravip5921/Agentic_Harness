@@ -1,17 +1,14 @@
 
-"""Groq-powered QA Agent for structured failure analysis.
+"""Provider-independent QA Agent for structured failure analysis.
 
 The agent interprets completed verification results and produces
 actionable feedback. It cannot execute tests or change the QA verdict.
 """
 
 import json
-import os
 
-from groq import Groq
 from pydantic import ValidationError
-from harness.tools.groq_rate_limit import call_groq
-from harness.tools.structured_output import strict_response_format
+from harness.llm import GenerationError, TextGenerator, create_generator
 
 from harness.models import (
     EngineeringSpec,
@@ -131,27 +128,19 @@ class QAGenerationError(Exception):
     """Raised when QA feedback generation or validation fails."""
 
 
-class GroqQAAgent:
-    """Generate structured QA feedback using Groq."""
+class QAAgent:
+    """Generate structured QA feedback using the configured model provider."""
 
     def __init__(
         self,
         model: str | None = None,
-        client: Groq | None = None,
+        client=None,
+        *,
+        provider: str | None = None,
+        generator: TextGenerator | None = None,
     ):
-        self.model = model or os.getenv(
-            "GROQ_MODEL",
-            "openai/gpt-oss-20b",
-        )
-
-        self.client = (
-            client
-            if client is not None
-            else Groq(
-                api_key=os.environ["GROQ_API_KEY"],
-                timeout=90.0,
-                max_retries=0,
-            )
+        self.generator = generator if generator is not None else create_generator(
+            model=model, provider=provider, client=client,
         )
 
     def generate(
@@ -184,13 +173,10 @@ class GroqQAAgent:
         }
 
         try:
-            response = call_groq(
-                "qa", self.client.chat.completions.create,
-                model=self.model,
-                temperature=0,
-                response_format=strict_response_format(
-                    "qa_feedback", schema
-                ),
+            response = self.generator.complete(
+                stage="qa",
+                schema=schema,
+                schema_name="qa_feedback",
                 messages=[
                     {
                         "role": "system",
@@ -203,7 +189,7 @@ class GroqQAAgent:
                 ],
             )
 
-            content = response.choices[0].message.content
+            content = response.text
 
             if not content:
                 raise QAGenerationError(
@@ -240,6 +226,9 @@ class GroqQAAgent:
 
         except QAGenerationError:
             raise
+
+        except GenerationError as exc:
+            raise QAGenerationError(str(exc)) from exc
 
         except (ValidationError, ValueError) as exc:
             raise QAGenerationError(
@@ -299,13 +288,10 @@ class GroqQAAgent:
         }
 
         try:
-            response = call_groq(
-                "qa", self.client.chat.completions.create,
-                model=self.model,
-                temperature=0,
-                response_format=strict_response_format(
-                    "qa_requirement_assessment", schema
-                ),
+            response = self.generator.complete(
+                stage="qa",
+                schema=schema,
+                schema_name="qa_requirement_assessment",
                 messages=[
                     {
                         "role": "system",
@@ -318,7 +304,7 @@ class GroqQAAgent:
                 ],
             )
 
-            content = response.choices[0].message.content
+            content = response.text
 
             if not content:
                 raise QAGenerationError(
@@ -340,6 +326,9 @@ class GroqQAAgent:
         except QAGenerationError:
             raise
 
+        except GenerationError as exc:
+            raise QAGenerationError(str(exc)) from exc
+
         except (ValidationError, RequirementCoverageError) as exc:
             raise QAGenerationError(
                 "QA Agent returned an invalid or incomplete "
@@ -350,3 +339,7 @@ class GroqQAAgent:
             raise QAGenerationError(
                 "QA requirements assessment failed."
             ) from exc
+
+
+# Compatibility alias for callers using the original Groq-specific name.
+GroqQAAgent = QAAgent

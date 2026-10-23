@@ -1,10 +1,7 @@
 
-"""Groq-powered engineering specification generation."""
+"""Provider-independent engineering specification generation."""
 
 import json
-import os
-
-from groq import Groq
 
 from harness.models import (
     EvidenceSource,
@@ -12,8 +9,7 @@ from harness.models import (
     TaskRequest,
 )
 from harness.tools.repository import RepositoryContext
-from harness.tools.groq_rate_limit import call_groq
-from harness.tools.structured_output import strict_response_format
+from harness.llm import TextGenerator, create_generator
 
 
 SYSTEM_PROMPT = """
@@ -70,21 +66,18 @@ class ResearchGenerationError(Exception):
     pass
 
 
-class GroqResearchAgent:
+class ResearchAgent:
     """Model adapter; can be replaced by a fake in unit tests."""
 
     def __init__(self, 
         model: str | None = None,
-        client: Groq | None = None,
+        client=None,
+        *,
+        provider: str | None = None,
+        generator: TextGenerator | None = None,
     ):
-        self.model = model or os.getenv(
-            "GROQ_MODEL", "openai/gpt-oss-20b"
-        )
-
-        self.client = Groq(
-            api_key=os.getenv("GROQ_API_KEY"),
-            timeout=60.0,
-            max_retries=0,
+        self.generator = generator if generator is not None else create_generator(
+            model=model, provider=provider, client=client,
         )
 
     def generate(
@@ -119,13 +112,10 @@ class GroqResearchAgent:
         }
 
         try:
-            response = call_groq(
-                "research", self.client.chat.completions.create,
-                model=self.model,
-                temperature=0,
-                response_format=strict_response_format(
-                    "research_assessment", schema
-                ),
+            response = self.generator.complete(
+                stage="research",
+                schema=schema,
+                schema_name="research_assessment",
                 messages=[
                     {
                         "role": "system",
@@ -138,7 +128,7 @@ class GroqResearchAgent:
                 ],
             )
 
-            content = response.choices[0].message.content
+            content = response.text
 
             if not content:
                 raise ResearchGenerationError(
@@ -157,3 +147,7 @@ class GroqResearchAgent:
                 "Research model generation or validation failed."
                   f"{type(exc).__name__}: {exc}"
             ) from exc
+
+
+# Compatibility alias for callers using the original Groq-specific name.
+GroqResearchAgent = ResearchAgent

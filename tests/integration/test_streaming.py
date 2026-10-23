@@ -190,10 +190,18 @@ def normalized(value, runs_dir):
 
 
 def artifact_contents(runs_dir):
+    def contents(path):
+        text = path.read_text(encoding="utf-8").replace(str(runs_dir), "<runs>")
+        if path.suffix == ".jsonl":
+            records = [json.loads(line) for line in text.splitlines()]
+            for record in records:
+                for field in ("timestamp", "request_id", "elapsed_seconds"):
+                    record.pop(field, None)
+            return json.dumps(records, sort_keys=True)
+        return text
+
     return {
-        str(path.relative_to(runs_dir)): path.read_text(encoding="utf-8").replace(
-            str(runs_dir), "<runs>",
-        )
+        str(path.relative_to(runs_dir)): contents(path)
         for path in runs_dir.rglob("*") if path.is_file()
     }
 
@@ -385,7 +393,7 @@ def test_groq_429_wait_is_streamed_and_request_recovers(tmp_path, monkeypatch):
         received.clear()
         waits.append(seconds)
 
-    monkeypatch.setattr("harness.tools.groq_rate_limit.sleep", fake_sleep)
+    monkeypatch.setattr("harness.llm.retry.sleep", fake_sleep)
     graph, calls = make_workflow(tmp_path, rate_limit_failures=2)
     task = TaskRequest(task="Implement addition.")
     with RateLimitRenderer(Console(file=output, force_terminal=False, width=120)) as renderer:
@@ -410,7 +418,7 @@ def test_oversized_request_exhaustion_fails_cli_gracefully(tmp_path, monkeypatch
     import harness.cli as cli
 
     waits = []
-    monkeypatch.setattr("harness.tools.groq_rate_limit.sleep", waits.append)
+    monkeypatch.setattr("harness.llm.retry.sleep", waits.append)
     task = TaskRequest(task="Implement addition.")
     workflow, calls = make_workflow(
         tmp_path, rate_limit_failures=3, requested_tokens=9000, rate_limit_status=status_code,
@@ -431,3 +439,7 @@ def test_oversized_request_exhaustion_fails_cli_gracefully(tmp_path, monkeypatch
     assert "QA: Not executed" in output
     assert "Release: Not executed" in output
     assert not (tmp_path / task.run_id / "development/attempt-0").exists()
+    diagnostic_path = tmp_path / task.run_id / "diagnostics/development-attempt-0.jsonl"
+    records = [json.loads(line) for line in diagnostic_path.read_text().splitlines()]
+    assert [record["event"] for record in records] == ["request_started", "request_failed"]
+    assert records[-1]["error_type"] in {"RateLimitError", "APIStatusError"}

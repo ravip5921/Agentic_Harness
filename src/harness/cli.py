@@ -29,10 +29,10 @@ from harness.stages.release import (
     make_release_stage,
 )
 
-from harness.agents.research_agent import GroqResearchAgent
-from harness.agents.developer_agent import GroqDeveloperAgent
-from harness.agents.qa_agent import GroqQAAgent
-from harness.agents.release_agent import GroqReleaseAgent
+from harness.agents.research_agent import ResearchAgent
+from harness.agents.developer_agent import DeveloperAgent
+from harness.agents.qa_agent import QAAgent
+from harness.agents.release_agent import ReleaseAgent
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -117,8 +117,8 @@ def create_task(args: argparse.Namespace) -> TaskRequest:
 def create_workflow(runs_dir: Path):
     """Initialize agents and assemble the LangGraph workflow."""
 
-    research_agent = GroqResearchAgent()
-    developer_agent = GroqDeveloperAgent()
+    research_agent = ResearchAgent()
+    developer_agent = DeveloperAgent()
 
     research_stage = make_research_stage(
         generator=research_agent.generate,
@@ -130,7 +130,7 @@ def create_workflow(runs_dir: Path):
         runs_dir=runs_dir,
     )
 
-    qa_agent = GroqQAAgent()
+    qa_agent = QAAgent()
 
     qa_stage = make_qa_stage(
         requirements_assessor=qa_agent.assess_requirements,
@@ -139,7 +139,7 @@ def create_workflow(runs_dir: Path):
     )
 
     def generate_release_notes(task, manifest, qa_report):
-        return GroqReleaseAgent().generate(
+        return ReleaseAgent().generate(
             task, manifest, qa_report
         )
 

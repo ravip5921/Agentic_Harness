@@ -30,7 +30,7 @@ from harness.models import (
 from harness.events import emit_event
 from harness.state import HarnessState
 
-from harness.agents.release_agent import GroqReleaseAgent
+from harness.agents.release_agent import ReleaseAgent
 
 from harness.tools.release_artifacts import (
     ReleaseArtifactError,
@@ -466,12 +466,12 @@ def make_release_stage(
 
 
 def release(state: HarnessState) -> dict:
-    """Default Release stage with optional Groq documentation."""
+    """Default Release stage with optional model-generated documentation."""
 
-    # Initialize Groq inside the advisory callback so even
+    # Initialize the model provider inside the advisory callback so even
     # initialization or configuration failures use the fallback.
     def generate_notes(task, manifest, qa_report):
-        agent = GroqReleaseAgent()
+        agent = ReleaseAgent()
         return agent.generate(task, manifest, qa_report)
 
     node = make_release_stage(

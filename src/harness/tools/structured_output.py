@@ -1,7 +1,7 @@
 """Shared strict JSON response formats for schema-constrained agent output.
 
-The configured Groq model must support strict structured outputs. Agents
-still validate responses locally to enforce application-specific rules.
+Groq and Chat Completions-compatible adapters use this strict format. Other
+adapters translate schemas for their API. Agents always validate locally.
 """
 
 from copy import deepcopy

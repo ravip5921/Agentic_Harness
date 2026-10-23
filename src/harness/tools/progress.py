@@ -23,12 +23,13 @@ def _text(value: str) -> str:
 class _RetryCountdown:
     """Rich refreshes the remaining time without extra stream events or lines."""
 
-    def __init__(self, seconds: float):
+    def __init__(self, seconds: float, provider: str = "Groq"):
         self.deadline = monotonic() + seconds
+        self.provider = provider
 
     def __rich__(self) -> Text:
         remaining = max(0, ceil(self.deadline - monotonic()))
-        return Text(f"  Groq rate limit: {remaining}s remaining", style="yellow")
+        return Text(f"  {self.provider} rate limit: {remaining}s remaining", style="yellow")
 
 
 class ProgressRenderer:
@@ -80,7 +81,8 @@ class ProgressRenderer:
             self.console.print(Text(f"\n● {_text(stage).upper()}", style="bold cyan"))
             self._stage = stage
 
-    def _line(self, message: str, level: str, seconds: float | None = None) -> None:
+    def _line(self, message: str, level: str, seconds: float | None = None,
+              provider: str = "Groq") -> None:
         self._stop()
         symbol, style = {
             "start": ("→", "cyan"),
@@ -94,7 +96,7 @@ class ProgressRenderer:
         line = Text(f"  {symbol} {_text(message)}", style=style)
         if level in {"start", "wait"} and self.console.is_interactive:
             current = (
-                _RetryCountdown(seconds) if seconds is not None
+                _RetryCountdown(seconds, provider) if seconds is not None
                 else Text(f"  {_text(message)}", style=style)
             )
             self._status = self.console.status(current, spinner="dots", spinner_style=style)
@@ -108,9 +110,10 @@ class ProgressRenderer:
 
     def _event(self, event: ProgressEvent) -> None:
         self._heading(event["stage"])
-        if event["event"] == "groq_rate_limit_wait_started":
-            self._line(event["message"], "wait", event["data"]["seconds"])
-        elif event["event"] == "groq_rate_limit_retrying":
+        if event["event"] in {"groq_rate_limit_wait_started", "llm_rate_limit_wait_started"}:
+            self._line(event["message"], "wait", event["data"]["seconds"],
+                       event["data"].get("provider", "Groq"))
+        elif event["event"] in {"groq_rate_limit_retrying", "llm_rate_limit_retrying"}:
             self._line(event["message"], "wait")
         else:
             self._line(event["message"], event.get("level", "info"))

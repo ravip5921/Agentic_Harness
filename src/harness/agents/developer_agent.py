@@ -1,5 +1,5 @@
 
-"""Groq-powered Developer Agent.
+"""Provider-independent Developer Agent.
 
 Generates implementation files from an engineering specification.
 
@@ -8,14 +8,11 @@ or determine whether the implementation passes QA.
 """
 
 import json
-import os
 
-from groq import Groq
 from pydantic import ValidationError
 
 from harness.events import emit_event
-from harness.tools.groq_rate_limit import call_groq
-from harness.tools.structured_output import strict_response_format
+from harness.llm import GenerationError, TextGenerator, create_generator
 from harness.models import (
     DevelopmentAssessment,
     EngineeringSpec,
@@ -305,24 +302,19 @@ def normalize_plan_operations(
     )
 
 
-class GroqDeveloperAgent:
-    """Generate validated implementation proposals using Groq."""
+class DeveloperAgent:
+    """Generate validated implementation proposals using the configured model provider."""
 
     def __init__(
         self,
         model: str | None = None,
-        client: Groq | None = None,
+        client=None,
+        *,
+        provider: str | None = None,
+        generator: TextGenerator | None = None,
     ):
-        self.model = model or os.getenv(
-            "GROQ_MODEL",
-            "openai/gpt-oss-20b",
-        )
-
-        # Client injection allows testing without real API calls.
-        self.client = client or Groq(
-            api_key=os.environ["GROQ_API_KEY"],
-            timeout=90.0,
-            max_retries=0,
+        self.generator = generator if generator is not None else create_generator(
+            model=model, provider=provider, client=client,
         )
 
     def plan(
@@ -357,13 +349,10 @@ class GroqDeveloperAgent:
             "Planning implementation", level="start",
         )
         try:
-            response = call_groq(
-                "developer", self.client.chat.completions.create,
-                model=self.model,
-                temperature=0,
-                response_format=strict_response_format(
-                    "development_plan", schema
-                ),
+            response = self.generator.complete(
+                stage="developer",
+                schema=schema,
+                schema_name="development_plan",
                 messages=[
                     {
                         "role": "system",
@@ -380,7 +369,7 @@ class GroqDeveloperAgent:
                 ],
             )
 
-            content = response.choices[0].message.content
+            content = response.text
 
             if not content:
                 raise DevelopmentGenerationError(
@@ -421,6 +410,9 @@ class GroqDeveloperAgent:
 
         except DevelopmentGenerationError:
             raise
+
+        except GenerationError as exc:
+            raise DevelopmentGenerationError(str(exc)) from exc
 
         except Exception as exc:
             raise DevelopmentGenerationError(
@@ -472,10 +464,8 @@ class GroqDeveloperAgent:
             data={"path": planned_file.path}, level="start",
         )
         try:
-            response = call_groq(
-                "developer", self.client.chat.completions.create,
-                model=self.model,
-                temperature=0,
+            response = self.generator.complete(
+                stage="developer",
                 messages=[
                     {
                         "role": "system",
@@ -488,7 +478,7 @@ class GroqDeveloperAgent:
                 ],
             )
 
-            content = response.choices[0].message.content
+            content = response.text
 
             if not content or not content.strip():
                 raise DevelopmentGenerationError(
@@ -519,6 +509,9 @@ class GroqDeveloperAgent:
 
         except DevelopmentGenerationError:
             raise
+
+        except GenerationError as exc:
+            raise DevelopmentGenerationError(str(exc)) from exc
 
         except ValidationError as exc:
             raise DevelopmentGenerationError(
@@ -575,3 +568,7 @@ class GroqDeveloperAgent:
             dependencies=plan.dependencies,
             notes=plan.notes,
         )
+
+
+# Compatibility alias for callers using the original Groq-specific name.
+GroqDeveloperAgent = DeveloperAgent

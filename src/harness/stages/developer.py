@@ -20,6 +20,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from harness.events import emit_event
+from harness.llm.diagnostics import diagnostics_to
 from harness.models import (
     DevelopmentAssessment,
     DevelopmentResult,
@@ -35,7 +36,7 @@ from harness.models import (
 from harness.state import HarnessState
 
 from harness.agents.developer_agent import (
-    GroqDeveloperAgent,
+    DeveloperAgent,
     DevelopmentGenerationError,
 )
 
@@ -411,12 +412,16 @@ def make_developer_stage(
                 },
                 level="start",
             )
-            assessment = generator(
-                specification,
-                repository,
-                qa_feedback,
-                previous_implementation,
-            )
+            diagnostics_path = runs_root / task.run_id / "diagnostics" / f"development-attempt-{revision_count}.jsonl"
+            emit_event("developer", "llm_diagnostics_enabled",
+                       f"Generation diagnostics: {diagnostics_path}")
+            with diagnostics_to(diagnostics_path):
+                assessment = generator(
+                    specification,
+                    repository,
+                    qa_feedback,
+                    previous_implementation,
+                )
 
             if not isinstance(assessment, DevelopmentAssessment):
                 raise DevelopmentValidationError(
@@ -550,7 +555,7 @@ def make_developer_stage(
 def developer(state: HarnessState) -> dict:
     """Default LangGraph entry point for Development."""
 
-    agent = GroqDeveloperAgent()
+    agent = DeveloperAgent()
 
     node = make_developer_stage(
         generator=agent.generate,

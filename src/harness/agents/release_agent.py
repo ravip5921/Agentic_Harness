@@ -1,5 +1,5 @@
 
-"""Groq-powered Release Agent.
+"""Provider-independent Release Agent.
 
 Generates release notes and review considerations from validated
 implementation and QA information.
@@ -13,12 +13,9 @@ The Release Agent does not:
 """
 
 import json
-import os
 
-from groq import Groq
 from pydantic import ValidationError
-from harness.tools.groq_rate_limit import call_groq
-from harness.tools.structured_output import strict_response_format
+from harness.llm import GenerationError, TextGenerator, create_generator
 
 from harness.models import (
     TaskRequest,
@@ -74,27 +71,19 @@ class ReleaseGenerationError(Exception):
     """Raised when release documentation generation fails."""
 
 
-class GroqReleaseAgent:
-    """Generate structured release documentation using Groq."""
+class ReleaseAgent:
+    """Generate structured release documentation using the configured model provider."""
 
     def __init__(
         self,
         model: str | None = None,
-        client: Groq | None = None,
+        client=None,
+        *,
+        provider: str | None = None,
+        generator: TextGenerator | None = None,
     ):
-        self.model = model or os.getenv(
-            "GROQ_MODEL",
-            "openai/gpt-oss-20b",
-        )
-
-        self.client = (
-            client
-            if client is not None
-            else Groq(
-                api_key=os.environ["GROQ_API_KEY"],
-                timeout=90.0,
-                max_retries=0,
-            )
+        self.generator = generator if generator is not None else create_generator(
+            model=model, provider=provider, client=client,
         )
 
     def generate(
@@ -145,13 +134,10 @@ class GroqReleaseAgent:
         }
 
         try:
-            response = call_groq(
-                "release", self.client.chat.completions.create,
-                model=self.model,
-                temperature=0,
-                response_format=strict_response_format(
-                    "release_assessment", schema
-                ),
+            response = self.generator.complete(
+                stage="release",
+                schema=schema,
+                schema_name="release_assessment",
                 messages=[
                     {
                         "role": "system",
@@ -164,7 +150,7 @@ class GroqReleaseAgent:
                 ],
             )
 
-            content = response.choices[0].message.content
+            content = response.text
 
             if not content:
                 raise ReleaseGenerationError(
@@ -180,6 +166,9 @@ class GroqReleaseAgent:
         except ReleaseGenerationError:
             raise
 
+        except GenerationError as exc:
+            raise ReleaseGenerationError(str(exc)) from exc
+
         except ValidationError as exc:
             raise ReleaseGenerationError(
                 "Release Agent returned an invalid ReleaseAssessment."
@@ -189,3 +178,7 @@ class GroqReleaseAgent:
             raise ReleaseGenerationError(
                 "Release Agent generation failed."
             ) from exc
+
+
+# Compatibility alias for callers using the original Groq-specific name.
+GroqReleaseAgent = ReleaseAgent

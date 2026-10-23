@@ -1,7 +1,8 @@
 # Agentic Harness
 
-Install the project and run the harness with `GROQ_API_KEY` in your environment
-or the project's root `.env` file:
+Install the project and configure a model provider in your environment or the
+project's root `.env` file (see `.env.example`). Existing Groq configuration
+continues to work without changes:
 
 ```bash
 python -m pip install -e .
@@ -12,8 +13,83 @@ harness "Update the client" --repository /path/to/repository --documentation-url
 `src/harness/config.py` centrally loads `.env` with `python-dotenv` when the
 harness starts through `main.py` or the CLI. Values already exported in the
 process environment take precedence. Loaded values are available throughout
-the process through `os.getenv("GROQ_API_KEY")` and other environment access.
+the process through environment access.
 You can also run the entry point with `python -m harness.main`.
+
+### Model providers
+
+All four agents use the provider-independent `TextGenerator.complete()`
+interface in `src/harness/llm/`. Adapters translate messages, structured schemas,
+output-token limits, authentication, and responses. Select a provider once;
+Research, Developer, QA, and Release use that configuration. There is no
+automatic fallback to another provider.
+
+For Gemini, set:
+
+```dotenv
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your-gemini-key
+GEMINI_MODEL=gemini-3.8-flash
+LLM_MAX_OUTPUT_TOKENS=4096
+```
+
+For Groq, use `LLM_PROVIDER=groq` (the default), `GROQ_API_KEY`, and optionally
+`GROQ_MODEL` (default `openai/gpt-oss-20b`). A Groq key is not required for Gemini.
+Gemini's default model is `gemini-3.8-flash`; choose a model available to your
+account. The native adapter uses Google's
+[generateContent API](https://ai.google.dev/api/generate-content), including
+`responseJsonSchema` for structured output.
+
+For a Chat Completions-compatible endpoint, set:
+
+```dotenv
+LLM_PROVIDER=openai-compatible
+LLM_BASE_URL=https://your-provider.example/v1
+LLM_MODEL=your-model-id
+LLM_API_KEY=your-key
+```
+
+The adapter appends `/chat/completions` to this base URL. The endpoint must
+support `max_completion_tokens` and strict `json_schema` responses for structured
+calls. Protocol compatibility varies; unsupported capabilities fail rather than
+silently weakening validation. APIs with a different protocol need an adapter.
+The built-in Gemini adapter uses the existing `requests` dependency; no extra
+SDK installation is required.
+
+`LLM_MODEL` and `LLM_API_KEY`, if set, override provider-specific model/key
+settings. Remove stale generic overrides when switching providers.
+`LLM_MAX_OUTPUT_TOKENS` defaults to 4096 and `LLM_TIMEOUT_SECONDS` to 90.
+Output budgets must fit the selected model and account limits; increasing a
+budget can cause oversized requests. Requests ending with `length`,
+`MAX_TOKENS`, or another non-normal completion status are rejected before
+their content is accepted. This detects provider-reported truncation; normal
+completion does not establish code correctness or test completeness.
+
+Every built-in provider prints request and response diagnostics through the
+CLI's progress stream. Requests identify the provider, model, file or operation,
+configured output-token limit, timeout, and input character count (not a token
+estimate). Responses show the finish reason, provider-reported prompt,
+completion, reasoning and total tokens, output characters/bytes/lines, and
+elapsed time. Missing metadata is labeled `unreported`. Python file responses
+also receive a syntax diagnostic; this does not replace QA.
+
+Developer planning and file-generation metadata is saved as JSON Lines under
+`runs/<run-id>/diagnostics/development-attempt-N.jsonl` (or the selected runs
+directory). These logs survive generation failures and are outside staging and
+release candidates. They contain no prompts, source text, API keys, or raw
+exception messages. Responses are logged before validation, including those
+rejected for truncation. `output_limit_reached` identifies a provider-reported
+token cutoff; `normal_stop_not_completeness_proof` and
+`finish_reason_unreported` distinguish other cases. Token counters retain the
+provider's definitions; reasoning tokens are not necessarily additive to
+completion tokens.
+
+Agents accept `generator=` for custom adapters and tests; `client=` injects a
+native transport for the selected provider (Groq SDK client, or an HTTP client
+with `post()` for Gemini/compatible endpoints). The old `Groq*Agent` class names
+remain aliases. To add a new protocol, implement `TextGenerator`, add its settings
+and factory selection, and test request/response translation. Agents and workflow
+stages need no changes.
 
 All runtime dependencies are declared in `pyproject.toml`. It is sufficient
 for pip to install the project and its dependencies; a separate
@@ -33,21 +109,21 @@ uses plain lines without animation. The original final JSON summary still
 includes all stage results, artifact paths, run ID, and revision count.
 Exit codes remain 0 for STAGED, 2 for BLOCKED, and 1 for failure or invalid input.
 
-All Groq requests share a global gate within the Python process. Successful
+All model requests share a global gate within the Python process. Successful
 requests proceed immediately. A **429 response** triggers a wait based on
-Groq's `Retry-After` / `retry-after-ms` headers or the error's "try again in"
+`Retry-After` / `retry-after-ms` headers, Gemini `RetryInfo.retryDelay`, or the error's "try again in"
 duration, plus **2 seconds of padding**. If multiple hints are present, the
 longest is respected. Without a valid hint, backoff starts at 5 seconds and
 doubles to a maximum of 60 seconds, plus padding.
 
 The harness allows up to **5 retries** for temporary rate limits. If the error
 says the individual requested token count exceeds the TPM limit, it allows
-only **2 retries** for that condition, whether Groq returns HTTP 429 or HTTP
+only **2 retries** for that condition, whether the provider returns HTTP 429 or HTTP
 413. A 413 is retried only when its TPM counts confirm `Requested > Limit`;
 other 413 errors propagate immediately. Exhaustion returns the error to the
 existing stage failure or documentation fallback handling. SDK automatic
 retries are disabled so these caps reflect actual API attempts. Other errors
-propagate immediately. Model settings, prompts, and response formats are unchanged.
+propagate immediately. The retry policy never shrinks or rewrites requests.
 
 This covers Research, Developer planning and each file, QA assessments and
 feedback, and Release documentation. Rich shows a yellow countdown and retry
@@ -71,14 +147,14 @@ RUN_LIVE_GROQ=0 python -m pytest -q tests/test_events.py tests/test_progress.py 
 
 Existing live Groq tests remain opt-in with `RUN_LIVE_GROQ=1`.
 
-Structured agent responses use a shared strict JSON Schema helper in
-`src/harness/tools/structured_output.py`. This covers Research, Developer
-planning, QA requirements and feedback, and Release documentation. The
-configured `GROQ_MODEL` must support strict structured outputs (including the
-default `openai/gpt-oss-20b`). Nested object fields are required and extra
-properties are forbidden; nullable fields retain their null option. Local
-Pydantic validation still enforces application rules. Developer file
-generation continues to return plain source text.
+Structured outputs cover Research, Developer planning, QA requirements and
+feedback, and Release documentation. Groq and compatible endpoints use the
+strict JSON Schema helper in `src/harness/tools/structured_output.py`; the
+configured model must support strict structured outputs. Gemini uses native
+JSON-schema output with references inlined and unsupported decoder constraints
+removed. Local Pydantic validation retains the complete original constraints
+and application rules for every provider. Developer file generation continues
+to return plain source text.
 
 ### QA dependencies
 

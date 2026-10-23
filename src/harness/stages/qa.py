@@ -64,7 +64,7 @@ from harness.tools.specifications import (
     load_engineering_spec,
 )
 from harness.agents.qa_agent import (
-    GroqQAAgent,
+    QAAgent,
     QAGenerationError,
 )
 
@@ -527,7 +527,7 @@ def make_qa_stage(
                             "Requirements assessor returned an invalid type."
                         )
 
-                    # Validate even injected assessors, not just GroqQAAgent.
+                    # Validate even injected assessors, not just QAAgent.
                     validate_requirement_coverage(
                         requirements_assessment,
                         specification,
@@ -745,9 +745,9 @@ def make_qa_stage(
 
 
 def qa(state: HarnessState) -> dict:
-    """Default Groq-assisted QA stage."""
+    """Default model-assisted QA stage."""
 
-    agent = GroqQAAgent()
+    agent = QAAgent()
 
     node = make_qa_stage(
         requirements_assessor=agent.assess_requirements,

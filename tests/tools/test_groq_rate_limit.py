@@ -11,6 +11,7 @@ import pytest
 from groq import APIStatusError, InternalServerError, RateLimitError
 
 from harness.tools import groq_rate_limit
+from harness.llm import retry as llm_retry
 
 
 MESSAGE = (
@@ -40,7 +41,7 @@ def oversized_413(headers=None):
 def runtime(monkeypatch):
     sleeper = Mock()
     events = []
-    monkeypatch.setattr(groq_rate_limit, "sleep", sleeper)
+    monkeypatch.setattr(llm_retry, "sleep", sleeper)
     monkeypatch.setattr("harness.events.get_stream_writer", lambda: events.append)
     return sleeper, events
 
@@ -114,7 +115,7 @@ def test_server_hints_and_fallback(message, headers, expected, runtime):
 
 def test_retry_after_http_date_is_supported(runtime, monkeypatch):
     sleeper, _events = runtime
-    monkeypatch.setattr(groq_rate_limit, "time", lambda: 1000)
+    monkeypatch.setattr(llm_retry, "time", lambda: 1000)
     request = Mock(side_effect=[rate_limit("Limited", {"retry-after": formatdate(1010, usegmt=True)}), "ok"])
     assert groq_rate_limit.call_groq("research", request) == "ok"
     sleeper.assert_called_once_with(12)
@@ -186,7 +187,7 @@ def test_other_agents_cannot_call_during_rate_limit_wait(monkeypatch, runtime):
         second_attempting.set()
         return groq_rate_limit.call_groq("release", lambda: second_called.set())
 
-    monkeypatch.setattr(groq_rate_limit, "sleep", sleep)
+    monkeypatch.setattr(llm_retry, "sleep", sleep)
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(groq_rate_limit.call_groq, "developer", first_request)
         try:
@@ -223,7 +224,7 @@ def test_every_agent_handles_oversized_exhaustion(monkeypatch, runtime, operatio
              rate_limit("tokens per minute (TPM): Limit 8000, Used 0, Requested 9000."))
     request = Mock(side_effect=error)
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=request)))
-    monkeypatch.setattr("harness.agents.research_agent.Groq", lambda **kwargs: client)
+    monkeypatch.setattr("harness.llm.groq.Groq", lambda **kwargs: client)
     spec = EngineeringSpec(
         title="Addition", objective="Add integers", requirements=["Implement add"],
         technical_approach="Python", implementation_steps=["Write code"],
@@ -314,8 +315,9 @@ def test_sdk_internal_retries_are_disabled(monkeypatch, module_name, agent_name)
     import importlib
 
     module = importlib.import_module(f"harness.agents.{module_name}")
+    adapter = importlib.import_module("harness.llm.groq")
     constructor = Mock()
-    monkeypatch.setattr(module, "Groq", constructor)
+    monkeypatch.setattr(adapter, "Groq", constructor)
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
     getattr(module, agent_name)()
     assert constructor.call_args.kwargs["max_retries"] == 0

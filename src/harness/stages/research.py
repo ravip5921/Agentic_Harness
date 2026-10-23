@@ -29,7 +29,7 @@ from harness.tools.evidence import (
     EvidenceError,
 )
 from harness.agents.research_agent import (
-    GroqResearchAgent,
+    ResearchAgent,
     ResearchGenerationError,
 )
 
@@ -319,7 +319,7 @@ def make_research_stage(
 def research(state: HarnessState) -> dict:
     """Default LangGraph entry point for Research."""
 
-    agent = GroqResearchAgent()
+    agent = ResearchAgent()
 
     node = make_research_stage(
         generator=agent.generate
