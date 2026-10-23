@@ -57,7 +57,9 @@ from harness.agents.qa_agent import GroqQAAgent
 from harness.stages.release import make_release_stage
 from harness.tools.release_artifacts import load_release_artifacts
 from harness.tools.release_workspace import prepare_release_workspace
+from harness.config import load_environment
 
+load_environment()
 RUN_LIVE_GROQ = os.getenv("RUN_LIVE_GROQ") == "1"
 
 live_groq = pytest.mark.skipif(

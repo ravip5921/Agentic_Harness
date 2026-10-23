@@ -15,8 +15,8 @@ import os
 from pathlib import Path
 
 import pytest
-from dotenv import load_dotenv
 
+from harness.config import load_environment
 from harness.graph import build_graph
 
 from harness.models import (
@@ -37,7 +37,7 @@ from harness.stages.qa import qa
 from harness.stages.release import release
 
 
-load_dotenv()
+load_environment()
 
 
 # ---------------------------------------------------------

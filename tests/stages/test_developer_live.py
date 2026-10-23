@@ -13,9 +13,9 @@ Live tests are skipped unless RUN_LIVE_GROQ=1.
 import os
 
 import pytest
-from dotenv import load_dotenv
 
 from harness.agents.developer_agent import GroqDeveloperAgent
+from harness.config import load_environment
 from harness.models import (
     EngineeringSpec,
     ImplementationManifest,
@@ -26,7 +26,7 @@ from harness.models import (
 from harness.stages.developer import make_developer_stage
 
 
-load_dotenv()
+load_environment()
 
 
 @pytest.mark.skipif(

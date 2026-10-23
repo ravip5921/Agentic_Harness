@@ -1,12 +1,29 @@
 # Agentic Harness
 
-Run the harness with the existing Groq configuration (`GROQ_API_KEY` in your
-environment or `.env`):
+Install the project and run the harness with `GROQ_API_KEY` in your environment
+or the project's root `.env` file:
 
 ```bash
-python -m pip install -e . -r requirements.txt
+python -m pip install -e .
 harness "Implement an addition utility with tests" --runs-dir runs
 harness "Update the client" --repository /path/to/repository --documentation-url https://example.com/docs --max-dev-revisions 2
+```
+
+`src/harness/config.py` centrally loads `.env` with `python-dotenv` when the
+harness starts through `main.py` or the CLI. Values already exported in the
+process environment take precedence. Loaded values are available throughout
+the process through `os.getenv("GROQ_API_KEY")` and other environment access.
+You can also run the entry point with `python -m harness.main`.
+
+All runtime dependencies are declared in `pyproject.toml`. It is sufficient
+for pip to install the project and its dependencies; a separate
+`requirements.txt` would duplicate that list. Requirements files are useful
+for installation constraints or pinned deployment environments, but this
+project does not currently need one. For development and tests, include the
+`dev` extra:
+
+```bash
+python -m pip install -e '.[dev]'
 ```
 
 The CLI displays operation progress as it happens, including validated file

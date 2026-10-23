@@ -1,8 +1,0 @@
-langgraph
-requests
-python_dotenv
-pydantic
-packaging>=24,<27
-pytest
-groq
-rich>=13,<15

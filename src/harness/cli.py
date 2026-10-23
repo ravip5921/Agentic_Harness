@@ -11,9 +11,9 @@ import sys
 
 from pathlib import Path
 
-from dotenv import load_dotenv
 from pydantic import ValidationError
 
+from harness.config import load_environment
 from harness.graph import build_graph
 from harness.models import RunStatus, TaskRequest
 from harness.tools.progress import ProgressRenderer
@@ -207,7 +207,7 @@ def stream_workflow(workflow, initial_state: dict, progress: ProgressRenderer) -
 def harness_cli(argv: list[str] | None = None) -> int:
     """Parse CLI input, execute the graph, and return an exit code."""
 
-    load_dotenv()
+    load_environment()
 
     parser = create_parser()
     args = parser.parse_args(argv)
