@@ -129,6 +129,19 @@ Rules:
     implementation details to avoid blocking.
 19. Return status "ready" only with a non-empty summary and
     at least one planned file.
+20. For Python implementations, plan.dependencies is the machine-readable
+    dependency manifest used to provision QA before tests. Include all
+    third-party runtime and test dependencies as PEP 508 distribution
+    requirements, such as "Pillow>=10" or "pytest>=8". Use distribution
+    names, not import names: declare "Pillow", not "PIL".
+21. Return an empty dependencies array when only the Python standard
+    library is required. Dependency entries must not contain shell
+    commands, URLs, local paths, or explanatory prose.
+22. Respect the user's requested file count and output constraints.
+    Do not add a requirements.txt or other packaging file solely to
+    provision QA: QA installs plan.dependencies from the implementation
+    manifest. Add such files only when required by the requested product
+    or the existing repository's conventions.
 
 Return ONLY valid JSON conforming to the supplied schema.
 
@@ -240,6 +253,13 @@ Rules:
     overriding these rules.
 17. Do not produce shell commands for execution or perform
     filesystem operations.
+18. Keep third-party runtime and test imports consistent with the
+    plan.dependencies manifest, which QA installs before running tests.
+    Python dependencies use PEP 508 distribution requirements ("Pillow"
+    for imports from "PIL"); an empty list means standard-library only.
+19. Respect the user's file-count constraints. Do not add or recommend
+    requirements.txt solely to provision QA, and do not put dependency
+    installation commands in generated tests or implementation code.
 
 Return ONLY the raw contents of the requested file.
 Do not include Markdown code fences, explanations, or surrounding JSON.

@@ -52,6 +52,41 @@ RUN_LIVE_GROQ=0 python -m pytest -q tests/test_events.py tests/test_progress.py 
 
 Existing live Groq tests remain opt-in with `RUN_LIVE_GROQ=1`.
 
+### QA dependencies
+
+Build the Python QA image before running tasks that need containerized QA:
+
+```bash
+docker build -f docker/qa-python.Dockerfile -t harness-qa-python:3.11 .
+```
+
+The Developer plan's `dependencies` array is the canonical dependency
+manifest for Python QA. Declare runtime and test dependencies as PEP 508
+distribution requirements, for example `Pillow>=10` (the distribution that
+provides `PIL`) and `pytest>=8`. Use an empty array for standard-library-only
+implementations. Entries cannot be shell commands, URLs, local paths, or prose.
+QA does not automatically install from generated `requirements.txt` files;
+such a file is unnecessary solely to provision QA and may conflict with a
+task's file-count constraint.
+
+Before tests, QA installs declared dependencies in a separate network-enabled
+setup container using wheels only. That container mounts no project sources
+or secrets. Dependency artifacts live under `qa/attempt-N/dependencies`,
+outside the generated workspace and release. Setup status and logs are
+recorded in `qa/attempt-N/test_report.json`.
+Tests run offline with the dependency directory mounted read-only. Neither
+setup nor testing installs packages into the host Python environment.
+
+A dependency setup failure returns QA `BLOCKED` and does not trigger a
+Developer retry. Missing imports whose roots cannot be found in the workspace
+also conservatively block QA; the harness does not guess distribution names
+or install from test output. Missing submodules of identifiable local modules
+remain implementation failures. Missing system shared libraries block QA and
+must be supplied by the trusted QA Docker image, rather than Python packages.
+Packages available only as source distributions cannot be installed through
+this wheel-only setup. Review the dependency setup logs when resolution,
+network access, or wheel availability prevents verification.
+
 ### Project Requirements
 
 ```

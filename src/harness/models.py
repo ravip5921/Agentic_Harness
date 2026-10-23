@@ -242,6 +242,7 @@ class QACheckType(str, Enum):
     """Category of verification performed by QA."""
 
     INTEGRITY = "integrity"
+    DEPENDENCY_SETUP = "dependency_setup"
     SYNTAX = "syntax"
     UNIT_TEST = "unit_test"
     CONTRACT_TEST = "contract_test"

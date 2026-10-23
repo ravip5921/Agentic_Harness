@@ -4,6 +4,7 @@
 The QA stage:
 - Validates Developer artifacts and manifest integrity.
 - Prepares a disposable test workspace.
+- Installs declared dependencies outside the project workspace.
 - Executes supported checks through the sandbox executor.
 - Writes a structured QA report.
 - Returns a QAResult for LangGraph routing.
@@ -44,6 +45,7 @@ from harness.tools.qa_workspace import (
     QAWorkspaceError,
     prepare_qa_workspace,
 )
+from harness.tools.qa_dependencies import prepare_qa_dependencies
 from harness.tools.qa_context import (
     QAContextError,
     load_qa_implementation_context,
@@ -281,6 +283,7 @@ def make_qa_stage(
     requirements_assessor=None,
     feedback_generator=None,
     runs_dir: Path = Path("runs"),
+    dependency_preparer=prepare_qa_dependencies,
 ):
     """Construct a LangGraph-compatible QA stage.
 
@@ -395,13 +398,46 @@ def make_qa_stage(
                 data={"workspace_path": str(workspace)}, level="success",
             )
 
-            # 3. Execute controlled checks.
-            checks = []
+            # 3. Provision dependencies before executing any project code.
+            # Keep the environment outside the workspace and release files.
+            dependencies_dir = attempt_dir / "dependencies"
+            emit_event(
+                "qa", "dependency_setup_started", "Preparing QA dependencies",
+                data={"dependency_count": len(manifest.dependencies)}, level="start",
+            )
+            setup_result = dependency_preparer(
+                dependencies=manifest.dependencies,
+                dependencies_dir=dependencies_dir,
+            )
+            if (
+                not isinstance(setup_result, QACheckResult)
+                or setup_result.check_type != QACheckType.DEPENDENCY_SETUP
+            ):
+                raise QAStageError("Dependency preparer returned an invalid result.")
 
-            for check_type in (
+            # Environment failures must never consume Developer revisions.
+            if setup_result.status != QACheckStatus.PASSED:
+                setup_result.status = QACheckStatus.BLOCKED
+            checks = [setup_result]
+            emit_event(
+                "qa", "dependency_setup_completed",
+                f"QA dependencies: {setup_result.status.value.upper()}",
+                data={
+                    "status": setup_result.status.value,
+                    "exit_code": setup_result.exit_code,
+                    "timed_out": setup_result.timed_out,
+                },
+                level=(
+                    "success" if setup_result.status == QACheckStatus.PASSED
+                    else "warning"
+                ),
+            )
+
+            check_types = (
                 QACheckType.SYNTAX,
                 QACheckType.UNIT_TEST,
-            ):
+            ) if setup_result.status == QACheckStatus.PASSED else ()
+            for check_type in check_types:
                 check_label = (
                     "Syntax checks"
                     if check_type == QACheckType.SYNTAX
@@ -411,9 +447,15 @@ def make_qa_stage(
                     "qa", "check_started", f"Running {check_label.lower()}",
                     data={"check_type": check_type.value}, level="start",
                 )
+                executor_options = (
+                    {"dependency_dir": dependencies_dir}
+                    if check_type == QACheckType.UNIT_TEST and manifest.dependencies
+                    else {}
+                )
                 result = test_executor(
                     check_type,
                     workspace,
+                    **executor_options,
                 )
 
                 if not isinstance(result, QACheckResult):
@@ -628,11 +670,17 @@ def make_qa_stage(
 
             else:
                 summary = "QA verification was blocked."
+                blocked_messages = [
+                    check.message for check in checks
+                    if check.status == QACheckStatus.BLOCKED and check.message
+                ]
+                if blocked_messages:
+                    summary += " " + " ".join(blocked_messages)
 
                 if assessment_error:
                     summary += (
                         f" Requirements assessment unavailable: "
-                        f"{assessment_error, {verdict}}"
+                        f"{assessment_error}"
                     )
 
 

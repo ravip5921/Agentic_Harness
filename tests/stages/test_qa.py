@@ -48,6 +48,9 @@ def make_stage(
     results,
     requirement_status=RequirementStatus.SATISFIED,
     requirements_assessor=None,
+    dependencies=None,
+    setup_status=QACheckStatus.PASSED,
+    feedback_generator=None,
 ):
     """Create a QA stage using mocked tools and requirements assessment."""
 
@@ -65,6 +68,7 @@ def make_stage(
 
     manifest = ImplementationManifest(
         summary="Example",
+        dependencies=dependencies or [],
         files=[
             {
                 "path": "main.py",
@@ -87,8 +91,25 @@ def make_stage(
         calls.append("workspace")
         return workspace_dir
 
-    def test_executor(check_type, workspace):
+    def dependency_preparer(dependencies, dependencies_dir):
+        calls.append("dependencies")
+        assert dependencies == manifest.dependencies
+        assert dependencies_dir.name == "dependencies"
+        assert dependencies_dir.parent.name == "attempt-0"
+        return QACheckResult(
+            name="dependency_setup",
+            check_type=QACheckType.DEPENDENCY_SETUP,
+            status=setup_status,
+            message="Declared dependencies could not be installed."
+            if setup_status != QACheckStatus.PASSED else "Dependencies ready.",
+        )
+
+    def test_executor(check_type, workspace, **kwargs):
         calls.append(check_type.value)
+        if check_type == QACheckType.UNIT_TEST and dependencies:
+            assert kwargs["dependency_dir"] == workspace.parent / "dependencies"
+        else:
+            assert kwargs == {}
         return results[check_type]
 
     def specification_loader(state, runs_dir):
@@ -144,6 +165,8 @@ def make_stage(
         artifact_loader=artifact_loader,
         workspace_preparer=workspace_preparer,
         test_executor=test_executor,
+        dependency_preparer=dependency_preparer,
+        feedback_generator=feedback_generator,
         report_writer=report_writer,
         specification_loader=specification_loader,
         context_loader=context_loader,
@@ -192,6 +215,7 @@ def test_qa_pass(tmp_path):
     assert calls == [
         "artifacts",
         "workspace",
+        "dependencies",
         "syntax",
         "unit_test",
         "specification",
@@ -246,6 +270,46 @@ def test_qa_blocked_by_executor(tmp_path):
 
     assert "unit_test" not in calls
     assert reports[0].verdict == QAVerdict.BLOCKED
+
+
+@pytest.mark.parametrize("setup_status", [
+    QACheckStatus.BLOCKED, QACheckStatus.FAILED, QACheckStatus.SKIPPED,
+])
+def test_dependency_setup_failure_stops_tests_and_repair_feedback(tmp_path, setup_status):
+    def unexpected(*args):
+        raise AssertionError("QA assessment and repair must not run after setup failure")
+
+    stage, calls, reports = make_stage(
+        tmp_path, {}, dependencies=["Pillow"], setup_status=setup_status,
+        requirements_assessor=unexpected, feedback_generator=unexpected,
+    )
+    result = stage(make_state())["qa_result"]
+
+    assert result.verdict == QAVerdict.BLOCKED
+    assert result.feedback is None
+    assert "dependencies could not be installed" in result.summary
+    assert calls == ["artifacts", "workspace", "dependencies", "report"]
+    assert reports[0].checks[0].check_type == QACheckType.DEPENDENCY_SETUP
+    assert reports[0].checks[0].status == QACheckStatus.BLOCKED
+    assert len(reports[0].checks) == 1
+
+
+def test_dependencies_are_provisioned_and_passed_to_unit_tests(tmp_path):
+    stage, calls, reports = make_stage(
+        tmp_path,
+        {kind: check(kind, QACheckStatus.PASSED) for kind in (
+            QACheckType.SYNTAX, QACheckType.UNIT_TEST,
+        )},
+        dependencies=["Pillow>=10"],
+    )
+
+    result = stage(make_state())["qa_result"]
+
+    assert result.verdict == QAVerdict.PASS
+    assert calls.index("dependencies") < calls.index("syntax") < calls.index("unit_test")
+    assert [item.check_type for item in reports[0].checks] == [
+        QACheckType.DEPENDENCY_SETUP, QACheckType.SYNTAX, QACheckType.UNIT_TEST,
+    ]
 
 
 def test_qa_missing_task(tmp_path):
