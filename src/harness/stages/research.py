@@ -16,6 +16,7 @@ from harness.models import (
     ResearchResult,
     StageOutcome,
 )
+from harness.events import emit_event
 from harness.state import HarnessState
 
 from harness.tools.repository import (
@@ -164,9 +165,32 @@ def make_research_stage(
         task = state["task"]
 
         try:
+            if task.repository_path is not None:
+                emit_event(
+                    "research", "repository_inspection_started",
+                    "Inspecting repository context", level="start",
+                )
             repository = repository_reader(
                 task.repository_path
             )
+            if task.repository_path is not None:
+                if repository is None:
+                    emit_event(
+                        "research", "repository_inspection_completed",
+                        "No repository context available",
+                    )
+                elif isinstance(repository, RepositoryContext):
+                    emit_event(
+                        "research", "repository_inspection_completed",
+                        f"Repository inspected: {len(repository.files)} files",
+                        data={"file_count": len(repository.files)},
+                        level="success",
+                    )
+                else:
+                    emit_event(
+                        "research", "repository_inspection_completed",
+                        "Repository inspection completed",
+                    )
 
             # Documentation URLs are supplied as task data.
             urls = task.parameters.get(
@@ -180,10 +204,30 @@ def make_research_stage(
                     "documentation_urls must be a list of strings."
                 )
 
+            emit_event(
+                "research", "evidence_retrieval_started",
+                "Retrieving supplied documentation",
+                data={"supplied_source_count": len(urls)}, level="start",
+            )
             evidence = evidence_reader(
                 urls,
             )
+            if isinstance(evidence, list):
+                emit_event(
+                    "research", "evidence_retrieval_completed",
+                    f"Documentation retrieved: {len(evidence)} sources",
+                    data={"source_count": len(evidence)}, level="success",
+                )
+            else:
+                emit_event(
+                    "research", "evidence_retrieval_completed",
+                    "Documentation retrieval completed",
+                )
 
+            emit_event(
+                "research", "specification_generation_started",
+                "Generating engineering specification", level="start",
+            )
             assessment = generator(
                 task,
                 repository,
@@ -191,6 +235,11 @@ def make_research_stage(
             )
 
             if assessment.status == "blocked":
+                emit_event(
+                    "research", "specification_generation_blocked",
+                    "Essential information is unavailable for the specification",
+                    level="warning",
+                )
                 result = ResearchResult(
                     outcome=StageOutcome.BLOCKED,
                     summary=assessment.reason,
@@ -209,6 +258,20 @@ def make_research_stage(
                     evidence,
                     runs_dir,
                 )
+                specification = assessment.specification
+                emit_event(
+                    "research", "specification_generated",
+                    "Specification generated: "
+                    f"{len(specification.requirements)} requirements, "
+                    f"{len(specification.acceptance_criteria)} acceptance criteria",
+                    data={
+                        "requirement_count": len(specification.requirements),
+                        "acceptance_criteria_count": len(
+                            specification.acceptance_criteria
+                        ),
+                    },
+                    level="success",
+                )
 
                 result = ResearchResult(
                     outcome=StageOutcome.COMPLETED,
@@ -222,6 +285,11 @@ def make_research_stage(
             EvidenceError,
             ValueError,
         ) as exc:
+            emit_event(
+                "research", "research_blocked",
+                "Research prerequisites could not be satisfied",
+                level="warning",
+            )
             result = ResearchResult(
                 outcome=StageOutcome.BLOCKED,
                 summary="Research prerequisites could not be satisfied.",
@@ -232,6 +300,11 @@ def make_research_stage(
             ResearchGenerationError,
             OSError,
         ) as exc:
+            emit_event(
+                "research", "research_failed",
+                "Research generation or artifact persistence failed",
+                level="failure",
+            )
             result = ResearchResult(
                 outcome=StageOutcome.FAILED,
                 summary="Research execution failed.",

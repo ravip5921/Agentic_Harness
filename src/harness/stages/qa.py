@@ -33,6 +33,7 @@ from harness.models import (
     RequirementStatus,
     ImplementationManifest,
 )
+from harness.events import emit_event
 from harness.state import HarnessState
 
 from harness.tools.artifacts import (
@@ -291,6 +292,9 @@ def make_qa_stage(
         development = state.get("development_result")
 
         if task is None or development is None:
+            emit_event(
+                "qa", "blocked", "QA prerequisites are missing.", level="warning"
+            )
             return {
                 "qa_result": QAResult(
                     verdict=QAVerdict.BLOCKED,
@@ -306,6 +310,10 @@ def make_qa_stage(
             or revision_count < 0
             or revision_count > task.max_dev_revisions
         ):
+            emit_event(
+                "qa", "blocked", "Invalid development revision counter.",
+                level="warning",
+            )
             return {
                 "qa_result": QAResult(
                     verdict=QAVerdict.BLOCKED,
@@ -314,6 +322,9 @@ def make_qa_stage(
             }
 
         if not re.fullmatch(r"[a-f0-9]{32}", task.run_id):
+            emit_event(
+                "qa", "blocked", "Invalid run identifier.", level="warning"
+            )
             return {
                 "qa_result": QAResult(
                     verdict=QAVerdict.BLOCKED,
@@ -335,6 +346,9 @@ def make_qa_stage(
 
         # Never silently overwrite an earlier QA attempt.
         if attempt_dir.exists() or attempt_dir.is_symlink():
+            emit_event(
+                "qa", "blocked", "QA attempt already exists.", level="warning"
+            )
             return {
                 "qa_result": QAResult(
                     verdict=QAVerdict.BLOCKED,
@@ -344,17 +358,41 @@ def make_qa_stage(
 
         try:
             # 1. Verify Developer's manifest and staged files.
+            emit_event(
+                "qa", "artifact_verification_started", "Verifying staged artifacts",
+                level="start",
+            )
             manifest, staging_dir = artifact_loader(
                 state,
                 runs_dir=runs_root,
             )
+            artifact_counts = (
+                {"file_count": len(manifest.files)}
+                if isinstance(manifest, ImplementationManifest) else {}
+            )
+            emit_event(
+                "qa", "artifact_verification_completed",
+                (
+                    f"Verified staged artifacts: {artifact_counts['file_count']} files"
+                    if artifact_counts else "Verified staged artifacts"
+                ),
+                data=artifact_counts, level="success",
+            )
 
             # 2. Prepare a disposable implementation workspace.
+            emit_event(
+                "qa", "workspace_preparation_started", "Preparing isolated QA workspace",
+                level="start",
+            )
             workspace = workspace_preparer(
                 manifest=manifest,
                 staging_dir=staging_dir,
                 workspace_dir=workspace_dir,
                 repository_path=task.repository_path,
+            )
+            emit_event(
+                "qa", "workspace_preparation_completed", "QA workspace prepared",
+                data={"workspace_path": str(workspace)}, level="success",
             )
 
             # 3. Execute controlled checks.
@@ -364,6 +402,15 @@ def make_qa_stage(
                 QACheckType.SYNTAX,
                 QACheckType.UNIT_TEST,
             ):
+                check_label = (
+                    "Syntax checks"
+                    if check_type == QACheckType.SYNTAX
+                    else "Unit tests"
+                )
+                emit_event(
+                    "qa", "check_started", f"Running {check_label.lower()}",
+                    data={"check_type": check_type.value}, level="start",
+                )
                 result = test_executor(
                     check_type,
                     workspace,
@@ -375,6 +422,21 @@ def make_qa_stage(
                     )
 
                 checks.append(result)
+                emit_event(
+                    "qa", "check_completed",
+                    f"{check_label}: {result.status.value.upper()}",
+                    data={
+                        "check_type": result.check_type.value,
+                        "status": result.status.value,
+                        "exit_code": result.exit_code,
+                        "timed_out": result.timed_out,
+                    },
+                    level=(
+                        "success" if result.status == QACheckStatus.PASSED
+                        else "failure" if result.status == QACheckStatus.FAILED
+                        else "warning"
+                    ),
+                )
 
                 # Do not continue after an infrastructure block.
                 if result.status == QACheckStatus.BLOCKED:
@@ -393,6 +455,10 @@ def make_qa_stage(
                 and execution_verdict != QAVerdict.BLOCKED
             ):
                 try:
+                    emit_event(
+                        "qa", "requirements_assessment_started", "Assessing requirements",
+                        level="start",
+                    )
                     specification = specification_loader(
                         state,
                         runs_dir=runs_root,
@@ -425,8 +491,33 @@ def make_qa_stage(
                         specification,
                         manifest,
                     )
+                    counts = {
+                        status.value: sum(
+                            finding.status == status
+                            for finding in requirements_assessment.findings
+                        )
+                        for status in RequirementStatus
+                    }
+                    emit_event(
+                        "qa", "requirements_assessment_completed",
+                        "Requirements assessed: "
+                        f"{counts['satisfied']} satisfied, "
+                        f"{counts['not_satisfied']} unsatisfied, "
+                        f"{counts['uncertain']} uncertain",
+                        data={**counts, "total": len(requirements_assessment.findings)},
+                        level=(
+                            "failure" if counts["not_satisfied"]
+                            else "warning" if counts["uncertain"]
+                            else "success"
+                        ),
+                    )
 
                 except Exception as exc:
+                    emit_event(
+                        "qa", "requirements_assessment_failed",
+                        f"Requirements assessment unavailable ({type(exc).__name__})",
+                        data={"reason": type(exc).__name__}, level="warning",
+                    )
                     logger.exception(
                         "Requirements assessment failed for run %s, attempt %d",
                         task.run_id,
@@ -442,6 +533,11 @@ def make_qa_stage(
             )
 
             # 6. Build deterministic fallback feedback.
+            if verdict == QAVerdict.FAIL:
+                emit_event(
+                    "qa", "feedback_generation_started", "Generating repair feedback",
+                    level="start",
+                )
             feedback = (
                 build_feedback(
                     checks,
@@ -498,12 +594,25 @@ def make_qa_stage(
                     feedback = generated_feedback
 
                 except Exception:
+                    emit_event(
+                        "qa", "feedback_generation_fallback",
+                        "QA Agent feedback unavailable; using deterministic feedback",
+                        level="warning",
+                    )
                     logger.exception(
                         "Feedback generation failed for run %s, attempt %d. "
                         "Using deterministic feedback.",
                         task.run_id,
                         revision_count,
                     )
+
+            if feedback is not None:
+                emit_event(
+                    "qa", "feedback_generation_completed",
+                    f"Repair feedback generated: {len(feedback.recommendations)} recommendations",
+                    data={"recommendation_count": len(feedback.recommendations)},
+                    level="success",
+                )
 
             # 7. Produce summary.
             if verdict == QAVerdict.PASS:
@@ -550,6 +659,10 @@ def make_qa_stage(
                 report,
                 report_path,
             )
+            emit_event(
+                "qa", "report_persisted", "QA report saved",
+                data={"report_path": str(report_path)}, level="success",
+            )
 
             # 6. Return the result for LangGraph routing.
             return {
@@ -569,6 +682,10 @@ def make_qa_stage(
             OSError,
             ValueError,
         ) as exc:
+            emit_event(
+                "qa", "blocked", f"QA could not complete ({type(exc).__name__})",
+                data={"reason": type(exc).__name__}, level="warning",
+            )
             return {
                 "qa_result": QAResult(
                     verdict=QAVerdict.BLOCKED,

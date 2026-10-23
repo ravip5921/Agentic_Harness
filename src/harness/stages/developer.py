@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 from collections.abc import Callable
 from pathlib import Path
 
+from harness.events import emit_event
 from harness.models import (
     DevelopmentAssessment,
     DevelopmentResult,
@@ -277,6 +278,10 @@ def make_developer_stage(
         task = state.get("task")
 
         if task is None:
+            emit_event(
+                "developer", "development_blocked",
+                "Development cannot start without a task", level="warning",
+            )
             return {
                 "development_result": DevelopmentResult(
                     outcome=StageOutcome.BLOCKED,
@@ -289,6 +294,10 @@ def make_developer_stage(
         revision_count = state.get("revision_count", 0)
 
         if not isinstance(revision_count, int) or revision_count < 0:
+            emit_event(
+                "developer", "development_failed",
+                "Invalid development revision counter", level="failure",
+            )
             return {
                 "development_result": DevelopmentResult(
                     outcome=StageOutcome.FAILED,
@@ -298,6 +307,10 @@ def make_developer_stage(
             }
 
         if not re.fullmatch(r"[a-f0-9]{32}", task.run_id):
+            emit_event(
+                "developer", "development_failed",
+                "Invalid run identifier", level="failure",
+            )
             return {
                 "development_result": DevelopmentResult(
                     outcome=StageOutcome.FAILED,
@@ -320,6 +333,10 @@ def make_developer_stage(
 
         # Prevent accidental reuse or replacement of previous artifacts.
         if attempt_dir.exists() or attempt_dir.is_symlink():
+            emit_event(
+                "developer", "development_blocked",
+                "Development attempt already exists", level="warning",
+            )
             return {
                 "development_result": DevelopmentResult(
                     outcome=StageOutcome.BLOCKED,
@@ -385,6 +402,15 @@ def make_developer_stage(
                 )
 
             # 4. Generate an implementation proposal.
+            emit_event(
+                "developer", "implementation_generation_started",
+                "Generating implementation",
+                data={
+                    "revision": revision_count,
+                    "max_revisions": task.max_dev_revisions,
+                },
+                level="start",
+            )
             assessment = generator(
                 specification,
                 repository,
@@ -398,6 +424,11 @@ def make_developer_stage(
                 )
 
             if assessment.status == "blocked":
+                emit_event(
+                    "developer", "development_blocked",
+                    "The Developer could not propose an implementation",
+                    level="warning",
+                )
                 return {
                     "development_result": DevelopmentResult(
                         outcome=StageOutcome.BLOCKED,
@@ -414,6 +445,10 @@ def make_developer_stage(
             )
 
             # 6. Validate and stage generated files.
+            emit_event(
+                "developer", "file_staging_started",
+                "Validating and staging implementation files", level="start",
+            )
             records = file_stager(
                 files=assessment.files,
                 staging_root=staging_dir,
@@ -435,6 +470,16 @@ def make_developer_stage(
             write_manifest(
                 manifest,
                 manifest_path,
+            )
+            emit_event(
+                "developer", "implementation_staged",
+                f"Implementation staged: {len(manifest.files)} files; manifest saved",
+                data={
+                    "file_count": len(manifest.files),
+                    "manifest_path": str(manifest_path),
+                    "staging_path": str(staging_dir),
+                },
+                level="success",
             )
 
             # 8. Return successful Development result.
@@ -492,6 +537,11 @@ def make_developer_stage(
         if staged and attempt_dir.exists():
             shutil.rmtree(attempt_dir)
 
+        emit_event(
+            "developer", f"development_{result.outcome.value}",
+            result.summary,
+            level="warning" if result.outcome == StageOutcome.BLOCKED else "failure",
+        )
         return {"development_result": result}
 
     return developer

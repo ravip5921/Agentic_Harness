@@ -25,7 +25,6 @@ from harness.models import (
     TaskRequest,
 )
 from harness.stages.developer import make_developer_stage
-from harness.stages.qa import qa
 from harness.tools.repository import RepositoryContext
 
 
@@ -614,7 +613,13 @@ def test_developer_integrates_with_graph(tmp_path):
 
     def traced_qa(current_state):
         executed.append("qa")
-        return qa(current_state)
+        assert current_state["development_result"].outcome == StageOutcome.COMPLETED
+        return {
+            "qa_result": QAResult(
+                verdict=QAVerdict.BLOCKED,
+                summary="QA execution is unavailable in this graph-routing test.",
+            )
+        }
 
     def unexpected_release(current_state):
         raise AssertionError(

@@ -13,6 +13,7 @@ import os
 from groq import Groq
 from pydantic import ValidationError
 
+from harness.events import emit_event
 from harness.models import (
     DevelopmentAssessment,
     EngineeringSpec,
@@ -329,6 +330,10 @@ class GroqDeveloperAgent:
             ),
         }
 
+        emit_event(
+            "developer", "implementation_planning_started",
+            "Planning implementation", level="start",
+        )
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -382,6 +387,11 @@ class GroqDeveloperAgent:
                     f"Developer produced an invalid implementation plan: {exc}"
                 ) from exc
 
+            emit_event(
+                "developer", "file_plan_validated",
+                f"Plan validated: {len(plan.files)} files",
+                data={"file_count": len(plan.files)}, level="success",
+            )
             return plan
 
         except DevelopmentGenerationError:
@@ -431,6 +441,11 @@ class GroqDeveloperAgent:
             ],
         }
 
+        emit_event(
+            "developer", "file_generation_started",
+            f"Generating {planned_file.path}",
+            data={"path": planned_file.path}, level="start",
+        )
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -463,12 +478,18 @@ class GroqDeveloperAgent:
                     f"for {planned_file.path}."
                 )
 
-            return GeneratedFile(
+            generated_file = GeneratedFile(
                 path=planned_file.path,
                 operation=planned_file.operation,
                 content=content,
                 description=planned_file.description,
             )
+            emit_event(
+                "developer", "file_generation_completed",
+                f"Generated {generated_file.path}",
+                data={"path": generated_file.path}, level="success",
+            )
+            return generated_file
 
         except DevelopmentGenerationError:
             raise

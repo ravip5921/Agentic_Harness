@@ -4,3 +4,4 @@ python_dotenv
 pydantic
 pytest
 groq
+rich>=13,<15

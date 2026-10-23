@@ -21,11 +21,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 from harness.models import (
+    ImplementationManifest,
     ReleaseAssessment,
     ReleaseManifest,
     ReleaseResult,
     ReleaseStatus,
 )
+from harness.events import emit_event
 from harness.state import HarnessState
 
 from harness.agents.release_agent import GroqReleaseAgent
@@ -183,6 +185,9 @@ def make_release_stage(
         task = state.get("task")
 
         if task is None:
+            emit_event(
+                "release", "blocked", "Release requires a TaskRequest.", level="warning"
+            )
             return {
                 "release_result": ReleaseResult(
                     status=ReleaseStatus.BLOCKED,
@@ -199,6 +204,10 @@ def make_release_stage(
             or revision < 0
             or revision > task.max_dev_revisions
         ):
+            emit_event(
+                "release", "blocked", "Invalid development revision counter.",
+                level="warning",
+            )
             return {
                 "release_result": ReleaseResult(
                     status=ReleaseStatus.BLOCKED,
@@ -207,6 +216,9 @@ def make_release_stage(
             }
 
         if not re.fullmatch(r"[a-f0-9]{32}", task.run_id):
+            emit_event(
+                "release", "blocked", "Invalid run identifier.", level="warning"
+            )
             return {
                 "release_result": ReleaseResult(
                     status=ReleaseStatus.BLOCKED,
@@ -230,6 +242,9 @@ def make_release_stage(
 
         # Avoid overwriting or mixing previous Release attempts.
         if release_dir.exists() or release_dir.is_symlink():
+            emit_event(
+                "release", "blocked", "Release attempt already exists.", level="warning"
+            )
             return {
                 "release_result": ReleaseResult(
                     status=ReleaseStatus.BLOCKED,
@@ -240,12 +255,33 @@ def make_release_stage(
 
         # Gate 1: QA authorization and artifact integrity.
         try:
+            emit_event(
+                "release", "artifact_validation_started", "Validating QA-approved artifacts",
+                level="start",
+            )
             artifacts = artifact_loader(
                 state,
                 runs_dir=runs_root,
             )
+            manifest = getattr(artifacts, "manifest", None)
+            artifact_counts = (
+                {"file_count": len(manifest.files)}
+                if isinstance(manifest, ImplementationManifest) else {}
+            )
+            emit_event(
+                "release", "artifact_validation_completed",
+                (
+                    f"Validated QA-approved artifacts: {artifact_counts['file_count']} files"
+                    if artifact_counts else "Validated QA-approved artifacts"
+                ),
+                data=artifact_counts, level="success",
+            )
 
         except ReleaseArtifactError as exc:
+            emit_event(
+                "release", "blocked", "Release prerequisites were not satisfied.",
+                data={"reason": type(exc).__name__}, level="warning",
+            )
             return {
                 "release_result": ReleaseResult(
                     status=ReleaseStatus.BLOCKED,
@@ -256,13 +292,25 @@ def make_release_stage(
 
         # Gate 2: Prepare the isolated candidate.
         try:
+            emit_event(
+                "release", "candidate_preparation_started", "Preparing release candidate",
+                level="start",
+            )
             candidate = workspace_preparer(
                 artifacts=artifacts,
                 release_dir=candidate_dir,
                 repository_path=task.repository_path,
             )
+            emit_event(
+                "release", "candidate_preparation_completed", "Release candidate prepared",
+                data={"candidate_path": str(candidate)}, level="success",
+            )
 
         except (ReleaseWorkspaceError, OSError, ValueError) as exc:
+            emit_event(
+                "release", "blocked", "Release candidate preparation failed.",
+                data={"reason": type(exc).__name__}, level="warning",
+            )
             return {
                 "release_result": ReleaseResult(
                     status=ReleaseStatus.BLOCKED,
@@ -277,6 +325,10 @@ def make_release_stage(
 
         if release_generator is not None:
             try:
+                emit_event(
+                    "release", "documentation_generation_started", "Generating release documentation",
+                    level="start",
+                )
                 assessment = release_generator(
                     task,
                     artifacts.manifest,
@@ -287,6 +339,10 @@ def make_release_stage(
                     raise ReleaseStageError(
                         "Release Agent returned an invalid assessment."
                     )
+                emit_event(
+                    "release", "documentation_generation_completed", "Release documentation generated",
+                    level="success",
+                )
 
             except Exception as exc:
                 logger.warning(
@@ -298,6 +354,11 @@ def make_release_stage(
                 )
 
                 agent_error = type(exc).__name__
+                emit_event(
+                    "release", "documentation_fallback_started",
+                    "Release Agent unavailable; generating deterministic documentation",
+                    data={"reason": agent_error}, level="warning",
+                )
 
                 assessment = deterministic_release_assessment(
                     artifacts.manifest,
@@ -305,9 +366,18 @@ def make_release_stage(
                     task.repository_path,
                     agent_error=agent_error,
                 )
+                emit_event(
+                    "release", "documentation_fallback_completed",
+                    "Deterministic release documentation generated", level="success",
+                )
 
         else:
             agent_error = "AgentNotConfigured"
+            emit_event(
+                "release", "documentation_fallback_started",
+                "Release Agent not configured; generating deterministic documentation",
+                data={"reason": agent_error}, level="warning",
+            )
 
             assessment = deterministic_release_assessment(
                 artifacts.manifest,
@@ -315,9 +385,17 @@ def make_release_stage(
                 task.repository_path,
                 agent_error=agent_error,
             )
+            emit_event(
+                "release", "documentation_fallback_completed",
+                "Deterministic release documentation generated", level="success",
+            )
 
         # Gate 3: Persist factual release metadata and documentation.
         try:
+            emit_event(
+                "release", "persistence_started", "Saving release manifest and reports",
+                level="start",
+            )
             release_manifest = ReleaseManifest(
                 run_id=task.run_id,
                 revision_count=revision,
@@ -346,8 +424,21 @@ def make_release_stage(
                     agent_error=agent_error,
                 ),
             )
+            emit_event(
+                "release", "persistence_completed", "Release manifest and reports saved",
+                data={
+                    "manifest_path": str(manifest_path),
+                    "assessment_path": str(assessment_path),
+                    "report_path": str(report_path),
+                },
+                level="success",
+            )
 
         except (OSError, ValueError) as exc:
+            emit_event(
+                "release", "failed", "Release documentation could not be saved.",
+                data={"reason": type(exc).__name__}, level="failure",
+            )
             return {
                 "release_result": ReleaseResult(
                     status=ReleaseStatus.FAILED,

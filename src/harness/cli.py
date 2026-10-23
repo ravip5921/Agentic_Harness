@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from harness.graph import build_graph
 from harness.models import RunStatus, TaskRequest
+from harness.tools.progress import ProgressRenderer
 
 from harness.stages.research import make_research_stage
 from harness.stages.developer import make_developer_stage
@@ -182,6 +183,27 @@ def display_result(state: dict) -> None:
         print(json.dumps(result.model_dump(mode="json"), indent=2))
 
 
+def stream_workflow(workflow, initial_state: dict, progress: ProgressRenderer) -> dict:
+    """Render live events and collect the same complete state as invoke().
+
+    `updates` contains partial node results. `values` provides LangGraph's
+    canonical accumulated state, including retry counters and terminal status.
+    Neither custom events nor presentation data are added to workflow state.
+    """
+    final_state = dict(initial_state)
+    for mode, payload in workflow.stream(
+        initial_state,
+        stream_mode=["custom", "updates", "values"],
+    ):
+        if mode == "values":
+            final_state = payload
+        elif mode == "custom":
+            progress.event(payload)
+        elif mode == "updates":
+            progress.update(payload, final_state)
+    return final_state
+
+
 def harness_cli(argv: list[str] | None = None) -> int:
     """Parse CLI input, execute the graph, and return an exit code."""
 
@@ -206,7 +228,9 @@ def harness_cli(argv: list[str] | None = None) -> int:
 
         print(f"Starting harness run: {task.run_id}")
 
-        final_state = workflow.invoke(initial_state)
+        with ProgressRenderer() as progress:
+            final_state = stream_workflow(workflow, initial_state, progress)
+            progress.finish(final_state["status"])
 
         display_result(final_state)
 
