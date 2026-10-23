@@ -1,4 +1,4 @@
-"""Coordinate Groq requests and retry 429 responses using server wait hints."""
+"""Retry Groq 429s and oversized-TPM 413s using server wait hints."""
 
 import math
 import re
@@ -8,7 +8,7 @@ from threading import Lock
 from time import sleep, time
 from typing import TypeVar
 
-from groq import RateLimitError
+from groq import APIStatusError
 
 from harness.events import emit_event
 
@@ -29,7 +29,7 @@ def _nonnegative(value) -> float | None:
         return None
 
 
-def _retry_delay(error: RateLimitError, retries: int) -> float:
+def _retry_delay(error: APIStatusError, retries: int) -> float:
     """Respect the longest valid server hint, with bounded fallback backoff."""
     delays = []
     headers = error.response.headers
@@ -60,7 +60,7 @@ def _retry_delay(error: RateLimitError, retries: int) -> float:
     return (max(delays) if delays else min(5 * 2 ** retries, 60)) + RETRY_PADDING_SECONDS
 
 
-def _token_budget(error: RateLimitError) -> dict:
+def _token_budget(error: APIStatusError) -> dict:
     """Extract TPM counts only; never expose the raw provider error in progress."""
     match = re.search(
         r"\bTPM\b.*?\bLimit\s+(\d[\d,]*).*?\bRequested\s+(\d[\d,]*)",
@@ -73,10 +73,10 @@ def _token_budget(error: RateLimitError) -> dict:
 
 
 def call_groq(stage: str, request: Callable[..., _Response], **kwargs) -> _Response:
-    """Call immediately; retry only 429s while retaining the process-wide gate.
+    """Retry 429s and confirmed oversized-TPM 413s under the global gate.
 
     Owned SDK clients disable automatic retries so each iteration is one API
-    attempt. Exhausted retries re-raise the last RateLimitError for the existing
+    attempt. Exhausted retries re-raise the last APIStatusError for the existing
     stage failure/fallback policy. Successful calls and other errors never wait.
     """
     retries = oversized_retries = 0
@@ -84,9 +84,11 @@ def call_groq(stage: str, request: Callable[..., _Response], **kwargs) -> _Respo
         while True:
             try:
                 response = request(**kwargs)
-            except RateLimitError as error:
+            except APIStatusError as error:
                 budget = _token_budget(error)
                 oversized = bool(budget and budget["requested_tokens"] > budget["tpm_limit"])
+                if error.status_code != 429 and not (error.status_code == 413 and oversized):
+                    raise
                 retry_limit = MAX_OVERSIZED_RETRIES if oversized else MAX_RATE_LIMIT_RETRIES
                 retry_number = oversized_retries if oversized else retries
                 reason = (

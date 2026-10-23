@@ -60,7 +60,7 @@ class RecordingProgress:
 
 def make_workflow(runs_dir, *, repair=False, always_bad=False,
                   release_failure=False, observe=lambda _stage: None,
-                  rate_limit_failures=0, requested_tokens=6489):
+                  rate_limit_failures=0, requested_tokens=6489, rate_limit_status=429):
     """Mock generation/controlled execution while retaining every trusted tool."""
     calls = {"planning": [], "files": [], "checks": [], "release": 0, "rate_limit_errors": 0}
     spec = EngineeringSpec(
@@ -81,7 +81,7 @@ def make_workflow(runs_dir, *, repair=False, always_bad=False,
         nonlocal rate_limit_failures
         if rate_limit_failures:
             import httpx
-            from groq import RateLimitError
+            from groq import APIStatusError, RateLimitError
 
             rate_limit_failures -= 1
             calls["rate_limit_errors"] += 1
@@ -89,8 +89,9 @@ def make_workflow(runs_dir, *, repair=False, always_bad=False,
                 "tokens per minute (TPM): Limit 8000, Used 2318, "
                 f"Requested {requested_tokens}. Please try again in 6.0525s."
             )
-            raise RateLimitError(message, response=httpx.Response(
-                429, request=httpx.Request("POST", "https://api.groq.com/test"),
+            error_type = RateLimitError if rate_limit_status == 429 else APIStatusError
+            raise error_type(message, response=httpx.Response(
+                rate_limit_status, request=httpx.Request("POST", "https://api.groq.com/test"),
             ), body={"message": message})
 
         context = json.loads(kwargs["messages"][-1]["content"])
@@ -404,13 +405,16 @@ def test_groq_429_wait_is_streamed_and_request_recovers(tmp_path, monkeypatch):
     assert "Workflow completed: STAGED" in text
 
 
-def test_oversized_request_exhaustion_fails_cli_gracefully(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("status_code", [429, 413])
+def test_oversized_request_exhaustion_fails_cli_gracefully(tmp_path, monkeypatch, capsys, status_code):
     import harness.cli as cli
 
     waits = []
     monkeypatch.setattr("harness.tools.groq_rate_limit.sleep", waits.append)
     task = TaskRequest(task="Implement addition.")
-    workflow, calls = make_workflow(tmp_path, rate_limit_failures=3, requested_tokens=9000)
+    workflow, calls = make_workflow(
+        tmp_path, rate_limit_failures=3, requested_tokens=9000, rate_limit_status=status_code,
+    )
     monkeypatch.setattr(cli, "create_task", lambda _args: task)
     monkeypatch.setattr(cli, "create_workflow", lambda _runs_dir: workflow)
 

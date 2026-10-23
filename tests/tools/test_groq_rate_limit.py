@@ -8,7 +8,7 @@ from unittest.mock import Mock, call
 
 import httpx
 import pytest
-from groq import InternalServerError, RateLimitError
+from groq import APIStatusError, InternalServerError, RateLimitError
 
 from harness.tools import groq_rate_limit
 
@@ -23,6 +23,17 @@ def rate_limit(message=MESSAGE, headers=None):
     return RateLimitError(message, response=httpx.Response(
         429, headers=headers, request=httpx.Request("POST", "https://api.groq.com/test"),
     ), body={"message": message})
+
+
+def oversized_413(headers=None):
+    message = (
+        "Request too large for model `openai/gpt-oss-20b` in organization "
+        "`org_private` service tier `on_demand` on tokens per minute (TPM): "
+        "Limit 8000, Requested 8406, please reduce your message size and try again."
+    )
+    return APIStatusError(message, response=httpx.Response(
+        413, headers=headers, request=httpx.Request("POST", "https://api.groq.com/test"),
+    ), body={"error": {"message": message, "type": "tokens", "code": "rate_limit_exceeded"}})
 
 
 @pytest.fixture
@@ -195,7 +206,8 @@ def test_other_agents_cannot_call_during_rate_limit_wait(monkeypatch, runtime):
     ("research", "research"), ("planning", "developer"), ("file", "developer"),
     ("requirements", "qa"), ("feedback", "qa"), ("release", "release"),
 ])
-def test_every_agent_handles_oversized_exhaustion(monkeypatch, runtime, operation, stage):
+@pytest.mark.parametrize("status_code", [429, 413])
+def test_every_agent_handles_oversized_exhaustion(monkeypatch, runtime, operation, stage, status_code):
     from harness.agents.developer_agent import GroqDeveloperAgent, DevelopmentGenerationError
     from harness.agents.qa_agent import GroqQAAgent, QAGenerationError
     from harness.agents.release_agent import GroqReleaseAgent, ReleaseGenerationError
@@ -207,7 +219,8 @@ def test_every_agent_handles_oversized_exhaustion(monkeypatch, runtime, operatio
     from harness.tools.qa_context import QAImplementationContext
 
     sleeper, events = runtime
-    error = rate_limit("tokens per minute (TPM): Limit 8000, Used 0, Requested 9000.")
+    error = (oversized_413() if status_code == 413 else
+             rate_limit("tokens per minute (TPM): Limit 8000, Used 0, Requested 9000."))
     request = Mock(side_effect=error)
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=request)))
     monkeypatch.setattr("harness.agents.research_agent.Groq", lambda **kwargs: client)
@@ -245,6 +258,52 @@ def test_every_agent_handles_oversized_exhaustion(monkeypatch, runtime, operatio
     waits = [event for event in events if event["event"] == "groq_rate_limit_wait_started"]
     assert len(waits) == 2
     assert all(event["stage"] == stage for event in waits)
+
+
+def test_413_oversized_request_stops_after_two_retries(runtime):
+    sleeper, events = runtime
+    error = oversized_413()
+    request = Mock(side_effect=error)
+    with pytest.raises(APIStatusError) as caught:
+        groq_rate_limit.call_groq("developer", request, model="test-model")
+    assert caught.value is error
+    assert request.call_args_list == [call(model="test-model")] * 3
+    assert sleeper.call_args_list == [call(7), call(12)]
+    assert events[-1]["event"] == "groq_rate_limit_exhausted"
+    assert events[-1]["data"] == {
+        "tpm_limit": 8000, "requested_tokens": 8406, "retries": 2, "oversized": True,
+    }
+    assert "org_private" not in str(events)
+    assert groq_rate_limit.call_groq("research", lambda: "next") == "next"
+
+
+def test_413_recovery_respects_server_retry_hint(runtime):
+    sleeper, events = runtime
+    request = Mock(side_effect=[oversized_413({"retry-after": "3"}), "ok"])
+    assert groq_rate_limit.call_groq("developer", request) == "ok"
+    sleeper.assert_called_once_with(5)
+    assert events[0]["data"]["max_retries"] == 2
+    assert events[-1]["event"] == "groq_rate_limit_recovered"
+
+
+@pytest.mark.parametrize("status_code,message", [
+    (413, "Request body too large"),
+    (413, "tokens per minute (TPM): Limit 8000, Requested 8000."),
+    (413, "tokens per minute (TPM): Limit 8000, Requested 7000."),
+    (400, "tokens per minute (TPM): Limit 8000, Requested 8406."),
+])
+def test_unrelated_status_errors_are_not_retried(runtime, status_code, message):
+    sleeper, events = runtime
+    error = APIStatusError(message, response=httpx.Response(
+        status_code, request=httpx.Request("POST", "https://api.groq.com/test"),
+    ), body=None)
+    request = Mock(side_effect=error)
+    with pytest.raises(APIStatusError) as caught:
+        groq_rate_limit.call_groq("developer", request)
+    assert caught.value is error
+    request.assert_called_once()
+    sleeper.assert_not_called()
+    assert events == []
 
 
 @pytest.mark.parametrize("module_name,agent_name", [

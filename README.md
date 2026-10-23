@@ -42,7 +42,9 @@ doubles to a maximum of 60 seconds, plus padding.
 
 The harness allows up to **5 retries** for temporary rate limits. If the error
 says the individual requested token count exceeds the TPM limit, it allows
-only **2 retries** for that condition. Exhaustion returns the error to the
+only **2 retries** for that condition, whether Groq returns HTTP 429 or HTTP
+413. A 413 is retried only when its TPM counts confirm `Requested > Limit`;
+other 413 errors propagate immediately. Exhaustion returns the error to the
 existing stage failure or documentation fallback handling. SDK automatic
 retries are disabled so these caps reflect actual API attempts. Other errors
 propagate immediately. Model settings, prompts, and response formats are unchanged.
