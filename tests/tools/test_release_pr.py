@@ -137,3 +137,24 @@ def test_local_only_repository_explains_missing_origin(publication):
         release_pr.create_release_pr(**p.kwargs)
     assert p.gh_calls == []
     assert (p.candidate / "existing.py").is_file()
+
+
+@pytest.mark.parametrize("error,command,expected", [
+    (FileNotFoundError(), ["gh", "auth", "status"], "Install GitHub CLI"),
+    (PermissionError(), ["gh", "auth", "status"], "Permission denied"),
+    (subprocess.TimeoutExpired("gh", 120), ["gh", "auth", "status"], "timed out"),
+    (subprocess.CalledProcessError(1, "gh", stderr="secret-token"),
+     ["gh", "auth", "status"], "GitHub CLI authentication check failed"),
+    (subprocess.CalledProcessError(1, "gh", stderr="secret-token"),
+     ["gh", "pr", "create"], "GitHub CLI PR creation failed"),
+])
+def test_command_errors_explain_failure_without_leaking_output(
+    tmp_path, monkeypatch, error, command, expected,
+):
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(release_pr.subprocess, "run", fail)
+    with pytest.raises(release_pr.ReleasePRError, match=expected) as caught:
+        release_pr._run(command, tmp_path)
+    assert "secret-token" not in str(caught.value)

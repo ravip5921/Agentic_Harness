@@ -24,6 +24,33 @@ def _run(args: list[str], cwd: Path) -> str:
             args, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
             capture_output=True, text=True, timeout=120, check=True,
         )
+    except FileNotFoundError as exc:
+        raise ReleasePRError(
+            f"{args[0]} executable was not found, or its working directory is unavailable. "
+            + ("Install GitHub CLI (gh) and restart the terminal/application so it picks up PATH. "
+               "Git SSH access alone does not provide GitHub CLI access."
+               if args[0] == "gh" else "Check installation and PATH.")
+        ) from exc
+    except PermissionError as exc:
+        raise ReleasePRError(f"Permission denied starting {args[0]}; check executable and working-directory access.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ReleasePRError(f"{args[0]} operation timed out after 120 seconds; check network and service availability.") from exc
+    except subprocess.CalledProcessError as exc:
+        if args[:3] == ["gh", "auth", "status"]:
+            message = (
+                "GitHub CLI authentication check failed "
+                f"(exit code {exc.returncode}). Run 'gh auth status --hostname github.com' "
+                "in the same environment as the harness, then 'gh auth login --hostname github.com' "
+                "if needed. Git SSH credentials are separate from GitHub CLI authentication."
+            )
+        elif args[:3] == ["gh", "pr", "create"]:
+            message = (
+                f"GitHub CLI PR creation failed (exit code {exc.returncode}). "
+                "Check the active GitHub CLI account, repository permissions, and GitHub availability."
+            )
+        else:
+            message = f"{args[0]} operation failed (exit code {exc.returncode}); check authentication and repository access."
+        raise ReleasePRError(message) from exc
     except (OSError, subprocess.SubprocessError) as exc:
         # Command output and arguments can include credential-bearing URLs.
         raise ReleasePRError(f"{args[0]} operation failed; check installation, authentication and repository access.") from exc
