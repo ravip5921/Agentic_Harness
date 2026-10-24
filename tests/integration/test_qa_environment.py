@@ -200,6 +200,7 @@ def run_line_drawer_graph(
         research=research,
         developer=make_developer_stage(generator=generate, runs_dir=runs_dir),
         qa=make_qa_stage(
+            runtime_preparer=lambda: None,
             dependency_preparer=prepare_dependencies,
             test_executor=execute,
             requirements_assessor=assess,

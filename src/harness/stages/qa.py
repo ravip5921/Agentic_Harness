@@ -46,6 +46,7 @@ from harness.tools.qa_workspace import (
     prepare_qa_workspace,
 )
 from harness.tools.qa_dependencies import prepare_qa_dependencies
+from harness.tools.qa_runtime import prepare_qa_runtime
 from harness.tools.qa_context import (
     QAContextError,
     QAImplementationContext,
@@ -285,6 +286,7 @@ def make_qa_stage(
     feedback_generator=None,
     runs_dir: Path = Path("runs"),
     dependency_preparer=prepare_qa_dependencies,
+    runtime_preparer=prepare_qa_runtime,
 ):
     """Construct a LangGraph-compatible QA stage.
 
@@ -361,6 +363,15 @@ def make_qa_stage(
             }
 
         try:
+            emit_event(
+                "qa", "runtime_preparation_started", "Checking Docker and QA image",
+                level="start",
+            )
+            runtime_preparer()
+            emit_event(
+                "qa", "runtime_preparation_completed", "Docker and QA image ready",
+                level="success",
+            )
             # 1. Verify Developer's manifest and staged files.
             emit_event(
                 "qa", "artifact_verification_started", "Verifying staged artifacts",
@@ -743,13 +754,13 @@ def make_qa_stage(
             ValueError,
         ) as exc:
             emit_event(
-                "qa", "blocked", f"QA could not complete ({type(exc).__name__})",
+                "qa", "blocked", f"QA could not complete ({type(exc).__name__}); see the QA result for details.",
                 data={"reason": type(exc).__name__}, level="warning",
             )
             return {
                 "qa_result": QAResult(
                     verdict=QAVerdict.BLOCKED,
-                    summary=f"QA could not complete: {exc}",
+                    summary=f"QA could not complete ({type(exc).__name__}): {exc}",
                 )
             }
 

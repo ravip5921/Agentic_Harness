@@ -165,7 +165,7 @@ def execute_check(
         QACheckResult with status, command, exit code, and logs.
 
     Notes:
-        Docker images must be built in advance.
+        The QA stage provisions the image before calling this executor.
         No image pulling, dependency installation, or network
         access is performed by this executor.
     """
@@ -321,6 +321,7 @@ def execute_check(
             message = (
                 "Docker could not run the QA check "
                 f"(exit code {process.returncode}). Check the QA image and runtime."
+                f" {(process.stderr or process.stdout or '')[-4000:].strip()}"
             )
         elif process.returncode != 0 and check_type == QACheckType.UNIT_TEST:
             missing_modules = sorted({

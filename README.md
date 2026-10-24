@@ -197,7 +197,16 @@ to return plain source text.
 
 ### QA dependencies
 
-Build the Python QA image before running tasks that need containerized QA:
+QA first checks Docker access and the local QA image before preparing a
+workspace. Start Docker Desktop (or the Docker daemon) before running QA.
+If `harness-qa-python:3.11` is missing, QA builds it automatically from the
+harness's `docker/qa-python.Dockerfile`, using an empty build context. The
+first build needs network access and has a ten-minute timeout. Existing
+images are reused. Docker access, inspection, or build errors stop QA as
+`BLOCKED`, with the exception and Docker diagnostics shown in the result;
+they do not trigger Developer retries.
+
+You can also build or rebuild the image manually from the source checkout:
 
 ```bash
 docker build -f docker/qa-python.Dockerfile -t harness-qa-python:3.11 .

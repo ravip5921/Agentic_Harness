@@ -92,6 +92,7 @@ def make_qa(tmp_path, manifest, check_status, finding_status, invalid_coverage=F
         )
 
     stage = qa_module.make_qa_stage(
+        runtime_preparer=lambda: None,
         artifact_loader=lambda *args, **kwargs: (manifest, tmp_path / "staging"),
         workspace_preparer=lambda **kwargs: kwargs["workspace_dir"],
         test_executor=executor,
@@ -184,6 +185,7 @@ def test_qa_progress_accepts_opaque_injected_manifest(tmp_path, capture_events):
         raise QAWorkspaceError("Workspace preparation unavailable.")
 
     stage = qa_module.make_qa_stage(
+        runtime_preparer=lambda: None,
         artifact_loader=lambda *args, **kwargs: (manifest, tmp_path / "staging"),
         workspace_preparer=prepare, runs_dir=tmp_path,
     )
@@ -194,7 +196,7 @@ def test_qa_progress_accepts_opaque_injected_manifest(tmp_path, capture_events):
 
     assert calls == ["workspace"]
     assert result.verdict == QAVerdict.BLOCKED
-    assert result.summary == "QA could not complete: Workspace preparation unavailable."
+    assert result.summary == "QA could not complete (QAWorkspaceError): Workspace preparation unavailable."
     verified = next(
         event for event in capture_events if event["event"] == "artifact_verification_completed"
     )

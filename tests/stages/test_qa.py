@@ -162,6 +162,7 @@ def make_stage(
         reports.append(report)
 
     stage = make_qa_stage(
+        runtime_preparer=lambda: None,
         artifact_loader=artifact_loader,
         workspace_preparer=workspace_preparer,
         test_executor=test_executor,

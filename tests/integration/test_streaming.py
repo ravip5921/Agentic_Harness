@@ -178,7 +178,7 @@ def make_workflow(runs_dir, *, repair=False, always_bad=False,
     workflow = build_graph(
         research=make_research_stage(generator=research_generator, runs_dir=runs_dir),
         developer=make_developer_stage(generator=developer_agent.generate, runs_dir=runs_dir),
-        qa=make_qa_stage(test_executor=execute_check,
+        qa=make_qa_stage(runtime_preparer=lambda: None, test_executor=execute_check,
                          requirements_assessor=assess_requirements, runs_dir=runs_dir),
         release=make_release_stage(release_generator=generate_release, runs_dir=runs_dir,
                                    human_approver=lambda **_: ReleaseDecision.KEEP_STAGED),

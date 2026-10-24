@@ -291,6 +291,7 @@ def make_workflow(
     )
 
     qa = make_qa_stage(
+        runtime_preparer=lambda: None,
         test_executor=fake_test_executor,
         requirements_assessor=fake_requirements_assessor,
         runs_dir=tmp_path,
@@ -801,6 +802,7 @@ def test_full_four_stage_workflow_reaches_staged(tmp_path):
         )
 
     qa_stage = make_qa_stage(
+        runtime_preparer=lambda: None,
         test_executor=qa_executor,
         requirements_assessor=qa_assessor,
         runs_dir=tmp_path,
