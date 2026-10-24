@@ -41,8 +41,10 @@ from harness.tools.artifacts import (
 )
 from harness.tools.filesystem import (
     MAX_FILE_BYTES,
+    FilesystemError,
     validate_relative_path,
 )
+from harness.tools.qa_context import QAImplementationContext, MAX_QA_CONTEXT_BYTES
 from harness.tools.qa_requirements import (
     RequirementCoverageError,
     validate_requirement_coverage,
@@ -186,10 +188,26 @@ def _validate_requirements(
         runs_dir=runs_root,
     )
 
+    reviewed_paths = set()
+    task = state["task"]
+    qa_dir = runs_root / task.run_id / "qa" / f"attempt-{state.get('revision_count', 0)}"
+    context_path = qa_dir / "implementation_context.json"
+    if context_path.exists() or context_path.is_symlink():
+        context = QAImplementationContext.model_validate_json(
+            _read_regular_file(context_path, MAX_QA_CONTEXT_BYTES * 8)
+        )
+        for path, content in context.repository_files.items():
+            relative = validate_relative_path(path)
+            data = _read_regular_file(qa_dir / "workspace" / relative, MAX_QA_CONTEXT_BYTES)
+            if data != content.encode("utf-8"):
+                raise ReleaseArtifactError(f"Reviewed repository file changed: {path}")
+            reviewed_paths.add(path)
+
     validate_requirement_coverage(
         assessment,
         specification,
         manifest,
+        reviewed_repository_paths=reviewed_paths,
     )
 
     if any(
@@ -401,6 +419,7 @@ def load_release_artifacts(
 
     except (
         ArtifactError,
+        FilesystemError,
         SpecificationError,
         RequirementCoverageError,
         ValidationError,

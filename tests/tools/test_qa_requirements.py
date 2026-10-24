@@ -136,3 +136,20 @@ def test_unknown_file_reference_is_rejected():
         validate_requirement_coverage(
             assessment, spec, make_manifest()
         )
+
+
+def test_reviewed_unchanged_test_can_support_a_requirement():
+    spec = make_spec()
+    assessment = make_assessment(spec)
+    assessment.findings[-1].test_files = ["tests/test_base.py"]
+    validate_requirement_coverage(assessment, spec, make_manifest(),
+                                 reviewed_repository_paths={"tests/test_base.py"})
+
+
+def test_repository_context_does_not_allow_unreviewed_paths():
+    spec = make_spec()
+    assessment = make_assessment(spec)
+    assessment.findings[-1].test_files = ["tests/imaginary.py"]
+    with pytest.raises(RequirementCoverageError, match="Unknown file references"):
+        validate_requirement_coverage(assessment, spec, make_manifest(),
+                                     reviewed_repository_paths={"tests/test_base.py"})

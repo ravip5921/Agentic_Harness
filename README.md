@@ -47,6 +47,14 @@ callback returning a `ReleaseDecision`; an absent callback blocks release.
 The CLI and default `release` entry point use the interactive prompt. This is
 a synchronous terminal gate; restarting a stopped process does not resume it.
 
+QA requirements review receives generated files plus bounded unchanged source
+and test files from the workspace that was tested. Findings may reference either
+set, so an existing regression test need not appear in the change manifest.
+The exact review context is saved in `qa/attempt-N/implementation_context.json`;
+Release verifies unchanged-file evidence against that snapshot. Missing context
+never authorizes invented file references. Test execution and requirements
+review are separate gates: passing pytest alone does not produce QA PASS.
+
 ### Model providers
 
 All four agents use the provider-independent `TextGenerator.complete()`

@@ -48,6 +48,7 @@ from harness.tools.qa_workspace import (
 from harness.tools.qa_dependencies import prepare_qa_dependencies
 from harness.tools.qa_context import (
     QAContextError,
+    QAImplementationContext,
     load_qa_implementation_context,
 )
 
@@ -511,6 +512,16 @@ def make_qa_stage(
                         runs_dir=runs_root,
                     )
 
+                    # Preserve the exact review context for Release to validate
+                    # unchanged-file references independently of the live repo.
+                    reviewed_repository_paths = set()
+                    if isinstance(implementation, QAImplementationContext):
+                        attempt_dir.mkdir(parents=True, exist_ok=True)
+                        (attempt_dir / "implementation_context.json").write_text(
+                            implementation.model_dump_json(indent=2), encoding="utf-8",
+                        )
+                        reviewed_repository_paths = set(implementation.repository_files)
+
                     requirements_assessment = requirements_assessor(
                         task,
                         specification,
@@ -532,6 +543,7 @@ def make_qa_stage(
                         requirements_assessment,
                         specification,
                         manifest,
+                        reviewed_repository_paths=reviewed_repository_paths,
                     )
                     counts = {
                         status.value: sum(

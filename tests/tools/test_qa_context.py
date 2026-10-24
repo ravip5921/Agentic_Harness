@@ -91,3 +91,43 @@ def test_rejects_incomplete_context(tmp_path):
             runs_dir=tmp_path,
             max_total_bytes=5,
         )
+
+
+def prepare_repository_snapshot(tmp_path):
+    state = make_state(tmp_path)
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    state["task"].repository_path = str(repository)
+    workspace = tmp_path / state["task"].run_id / "qa/attempt-0/workspace"
+    (workspace / "tests").mkdir(parents=True)
+    (workspace / "tests/test_base.py").write_text("def test_base(): assert True\n")
+    (workspace / "calculator.py").write_text("This file is already supplied from staging")
+    return state, repository, workspace
+
+
+def test_unchanged_context_comes_from_tested_snapshot(tmp_path):
+    state, repository, workspace = prepare_repository_snapshot(tmp_path)
+    (repository / "tests").mkdir()
+    (repository / "tests/test_base.py").write_text("different live file\n")
+    context = load_qa_implementation_context(state, runs_dir=tmp_path)
+    assert context.repository_files == {"tests/test_base.py": "def test_base(): assert True\n"}
+    assert "calculator.py" not in context.repository_files
+
+
+def test_unchanged_context_respects_remaining_budget(tmp_path):
+    state, _, _ = prepare_repository_snapshot(tmp_path)
+    generated_size = sum(len(file.content.encode()) for file in
+        load_qa_implementation_context(state, runs_dir=tmp_path).files)
+    context = load_qa_implementation_context(state, runs_dir=tmp_path,
+                                             max_total_bytes=generated_size)
+    assert context.repository_files == {}
+    assert context.repository_context_truncated
+
+
+def test_unchanged_context_excludes_symlinks(tmp_path):
+    state, _, workspace = prepare_repository_snapshot(tmp_path)
+    outside = tmp_path / "outside.py"
+    outside.write_text("secret = True\n")
+    (workspace / "linked.py").symlink_to(outside)
+    context = load_qa_implementation_context(state, runs_dir=tmp_path)
+    assert "linked.py" not in context.repository_files

@@ -9,7 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from harness.models import FileOperation, ImplementationManifest
 from harness.state import HarnessState
 from harness.tools.artifacts import load_development_artifacts
-from harness.tools.filesystem import validate_relative_path
+from harness.tools.filesystem import validate_relative_path, validate_repository_file
+from harness.tools.repository import inspect_repository
 
 
 MAX_QA_CONTEXT_BYTES = 100_000
@@ -31,6 +32,8 @@ class QAImplementationContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     files: list[VerifiedSourceFile] = Field(min_length=1)
+    repository_files: dict[str, str] = Field(default_factory=dict)
+    repository_context_truncated: bool = False
 
 
 def _read_verified_file(
@@ -79,7 +82,7 @@ def load_qa_implementation_context(
     runs_dir: Path = Path("runs"),
     max_total_bytes: int = MAX_QA_CONTEXT_BYTES,
 ) -> QAImplementationContext:
-    """Load all generated files from the verified current attempt.
+    """Load generated files and bounded unchanged files from the tested snapshot.
 
     Rejects oversized or non-text implementations instead of silently
     producing incomplete review context.
@@ -114,4 +117,28 @@ def load_qa_implementation_context(
             )
         )
 
-    return QAImplementationContext(files=result)
+    repository_files = {}
+    truncated = False
+    task = state["task"]
+    if task.repository_path is not None:
+        # Use the snapshot actually tested, rather than rereading the live repo.
+        relative_workspace = (
+            Path(task.run_id) / "qa"
+            / f"attempt-{state.get('revision_count', 0)}" / "workspace"
+        )
+        workspace = validate_repository_file(Path(runs_dir).resolve(), relative_workspace)
+        repository = inspect_repository(str(workspace))
+        generated_paths = {record.path for record in manifest.files}
+        truncated = repository.truncated
+        for path, content in repository.excerpts.items():
+            if path in generated_paths:
+                continue
+            size = len(content.encode("utf-8"))
+            if size > remaining:
+                truncated = True
+                continue
+            repository_files[path] = content
+            remaining -= size
+
+    return QAImplementationContext(files=result, repository_files=repository_files,
+                                   repository_context_truncated=truncated)

@@ -55,10 +55,13 @@ def validate_requirement_coverage(
     assessment: QARequirementAssessment,
     specification: EngineeringSpec,
     manifest: ImplementationManifest,
+    *,
+    reviewed_repository_paths: set[str] | None = None,
 ) -> None:
     """Reject omitted, duplicated, invented, or altered requirements.
 
-    File references must point to files listed in the Developer manifest.
+    File references must point to generated files or reviewed repository files
+    supplied by the trusted QA context loader, never arbitrary model paths.
     This checks completeness and consistency, not whether the LLM's
     judgments are factually correct.
     """
@@ -69,6 +72,7 @@ def validate_requirement_coverage(
     }
 
     valid_paths = {record.path for record in manifest.files}
+    valid_paths.update(reviewed_repository_paths or ())
     found = set()
 
     for finding in assessment.findings:

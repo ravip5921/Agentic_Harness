@@ -377,6 +377,19 @@ def test_assess_requirements_complete():
     assert len(context["execution_results"]) == 2
 
 
+def test_assess_requirements_accepts_reviewed_unchanged_test():
+    task, specification, manifest, implementation, checks = make_requirements_inputs()
+    implementation.repository_files = {"tests/test_base.py": "def test_base(): assert True\n"}
+    payload = json.loads(make_assessment_response(specification))
+    payload["findings"][-1]["test_files"] = ["tests/test_base.py"]
+    client = FakeGroqClient(json.dumps(payload))
+    assessment = GroqQAAgent(client=client).assess_requirements(
+        task, specification, manifest, implementation, checks)
+    assert assessment.findings[-1].test_files == ["tests/test_base.py"]
+    context = json.loads(client.calls[0]["messages"][1]["content"])
+    assert context["repository_files"] == implementation.repository_files
+
+
 def test_assess_requirements_rejects_missing_criterion():
     (
         task,

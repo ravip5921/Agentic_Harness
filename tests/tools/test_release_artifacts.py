@@ -29,6 +29,7 @@ from harness.models import (
 )
 
 from harness.tools.filesystem import stage_generated_files
+from harness.tools.qa_context import QAImplementationContext, VerifiedSourceFile
 from harness.tools.release_artifacts import (
     ReleaseArtifactError,
     load_release_artifacts,
@@ -235,6 +236,53 @@ def test_valid_qa_pass(release_fixture):
     assert len(artifacts.manifest.files) == 2
     assert artifacts.staging_dir == release_fixture["staging_dir"]
     assert artifacts.qa_workspace == release_fixture["workspace"]
+
+
+def add_reviewed_existing_test(fixture):
+    workspace = fixture["workspace"]
+    (workspace / "tests/test_base.py").write_text("def test_base(): assert True\n")
+    manifest = ImplementationManifest.model_validate_json(fixture["manifest_path"].read_text())
+    context = QAImplementationContext(
+        files=[VerifiedSourceFile(path=record.path, operation=record.operation,
+                                  content=(fixture["staging_dir"] / record.path).read_text())
+               for record in manifest.files],
+        repository_files={"tests/test_base.py": "def test_base(): assert True\n"},
+    )
+    context_path = workspace.parent / "implementation_context.json"
+    context_path.write_text(context.model_dump_json(indent=2))
+
+    def reference_existing_test(report):
+        report.requirements_assessment.findings[-1].test_files.append("tests/test_base.py")
+
+    update_report(fixture, reference_existing_test)
+    return context_path
+
+
+def test_release_accepts_unchanged_test_reviewed_by_qa(release_fixture):
+    add_reviewed_existing_test(release_fixture)
+    assert load_release_artifacts(release_fixture["state"],
+        runs_dir=release_fixture["runs_dir"]).qa_report.verdict == QAVerdict.PASS
+
+
+@pytest.mark.parametrize("mutation", ["changed", "deleted", "symlink", "missing_context", "unsafe_path"])
+def test_release_rejects_unverifiable_unchanged_file_evidence(release_fixture, mutation):
+    context_path = add_reviewed_existing_test(release_fixture)
+    test_file = release_fixture["workspace"] / "tests/test_base.py"
+    if mutation == "changed":
+        test_file.write_text("changed after QA\n")
+    elif mutation == "deleted":
+        test_file.unlink()
+    elif mutation == "symlink":
+        test_file.unlink()
+        test_file.symlink_to(release_fixture["workspace"] / "tests/test_add.py")
+    elif mutation == "missing_context":
+        context_path.unlink()
+    else:
+        context = QAImplementationContext.model_validate_json(context_path.read_text())
+        context.repository_files = {"../outside.py": "outside"}
+        context_path.write_text(context.model_dump_json(indent=2))
+    with pytest.raises(ReleaseArtifactError):
+        load_release_artifacts(release_fixture["state"], runs_dir=release_fixture["runs_dir"])
 
 
 def test_rejects_failed_qa(release_fixture):
