@@ -1,246 +1,98 @@
 # Agentic Harness
 
-Install the project and configure a model provider in your environment or the
-project's root `.env` file (see `.env.example`). Existing Groq configuration
-continues to work without changes:
+Agentic Harness is a Python command-line tool that turns a natural-language software task into a four-stage LangGraph workflow: Research creates a design specification, Developer implements it, QA tests and reviews the result in Docker, and Release prepares the output for human approval. It supports new standalone projects or changes to an existing repository, saves run artifacts for review, and works with Groq, Gemini, or a compatible model endpoint.
+
+## Setup
+
+You need Python 3.11 or newer, a model provider API key, and **Docker installed and running**. Start Docker Desktop (or the Docker daemon) before running the harness; QA requires access to it. The first run automatically builds the QA image and needs network access.
+
+From the project root, create and activate a virtual environment:
+
+```bash
+python -m venv .venv
+```
+
+On Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+On macOS or Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Alternatively, if you have Conda installed, create and activate a Conda environment with Python 3.12:
+
+```bash
+conda create -n harness python=3.12
+conda activate harness
+```
+
+With either environment active, install the project and its dependencies:
 
 ```bash
 python -m pip install -e .
+```
+
+Copy `.env.example` to `.env` in the project root (`Copy-Item .env.example .env` in PowerShell, or `cp .env.example .env` on macOS/Linux). Set `LLM_PROVIDER` and the corresponding API key. The default is Groq, so replace the `GROQ_API_KEY` placeholder with your key. The same [.env.example](.env.example) includes settings for Gemini and compatible endpoints.
+
+Confirm Docker is reachable:
+
+```bash
+docker info
+```
+
+## Run
+
+Run a task from the project root with the virtual environment active:
+
+```bash
 harness "Implement an addition utility with tests" --runs-dir runs
+```
+
+To work on an existing repository:
+
+```bash
 harness "Update the client" --repository /path/to/repository --documentation-url https://example.com/docs --max-dev-revisions 2
 ```
 
-`src/harness/config.py` centrally loads `.env` with `python-dotenv` when the
-harness starts through `main.py` or the CLI. Values already exported in the
-process environment take precedence. Loaded values are available throughout
-the process through environment access.
-You can also run the entry point with `python -m harness.main`.
+Artifacts are saved under `runs/<run-id>/`. After QA passes, the terminal prompts for release approval; see [Release](#release) below for staging and pull request options.
 
-### Human release approval
+You can also run the CLI with `python -m harness.main`.
 
-After QA passes, Release prepares the isolated candidate and report, prints
-their paths, and asks `Approve this release candidate? [y/N]`. Approval then
-offers `staged` (the default) or `pr` when `--repository` is supplied.
+## Release
 
-- `staged` keeps the approved output in the run's release directory.
-- `pr` pushes a new `harness/<run-id>/attempt-N` branch and opens a draft
-  GitHub pull request against the target repository's current branch. Review
-  and merge that PR through your usual process. The original working tree
-  remains unchanged.
-- Rejection, interrupted input, or unavailable stdin blocks release and
-  preserves the candidate. There is no unattended approval flag.
+After QA passes, Release prepares a candidate and asks `Approve this release candidate? [y/N]`. If approved, choose one of these options:
 
-PR creation requires Git, the [GitHub CLI](https://cli.github.com/manual/gh_pr_create),
-`gh auth login`, a configured Git author (`user.name` and `user.email`), and push
-access to the target's GitHub `origin`. The target must be a clean repository
-root whose current branch matches that branch on origin. Commit/stash local
-work and synchronize before starting the run. Standalone runs support staging.
+- `staged` (default): keeps the approved output in the run's release directory.
+- `pr` (requires `--repository`): pushes a new branch and opens a draft GitHub pull request for review and merging. The original working tree remains unchanged.
 
-The release directory records `release_decision.json` (choice, timestamp, and
-manifest digest), `release_result.json`, and the final outcome in
-`release_report.md`. If a push succeeds but PR creation fails, the result
-identifies the pushed branch so you can recover without repeating the push.
-Other failures also preserve the candidate and return a blocked result.
-
-Programmatic users of `make_release_stage` must supply a `human_approver`
-callback returning a `ReleaseDecision`; an absent callback blocks release.
-The CLI and default `release` entry point use the interactive prompt. This is
-a synchronous terminal gate; restarting a stopped process does not resume it.
-
-QA requirements review receives generated files plus bounded unchanged source
-and test files from the workspace that was tested. Findings may reference either
-set, so an existing regression test need not appear in the change manifest.
-The exact review context is saved in `qa/attempt-N/implementation_context.json`;
-Release verifies unchanged-file evidence against that snapshot. Missing context
-never authorizes invented file references. Test execution and requirements
-review are separate gates: passing pytest alone does not produce QA PASS.
-
-### Model providers
-
-All four agents use the provider-independent `TextGenerator.complete()`
-interface in `src/harness/llm/`. Adapters translate messages, structured schemas,
-output-token limits, authentication, and responses. Select a provider once;
-Research, Developer, QA, and Release use that configuration. There is no
-automatic fallback to another provider.
-
-For Gemini, set:
-
-```dotenv
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=your-gemini-key
-GEMINI_MODEL=gemini-3.8-flash
-LLM_MAX_OUTPUT_TOKENS=4096
-```
-
-For Groq, use `LLM_PROVIDER=groq` (the default), `GROQ_API_KEY`, and optionally
-`GROQ_MODEL` (default `openai/gpt-oss-20b`). A Groq key is not required for Gemini.
-Gemini's default model is `gemini-3.8-flash`; choose a model available to your
-account. The native adapter uses Google's
-[generateContent API](https://ai.google.dev/api/generate-content), including
-`responseJsonSchema` for structured output.
-
-For a Chat Completions-compatible endpoint, set:
-
-```dotenv
-LLM_PROVIDER=openai-compatible
-LLM_BASE_URL=https://your-provider.example/v1
-LLM_MODEL=your-model-id
-LLM_API_KEY=your-key
-```
-
-The adapter appends `/chat/completions` to this base URL. The endpoint must
-support `max_completion_tokens` and strict `json_schema` responses for structured
-calls. Protocol compatibility varies; unsupported capabilities fail rather than
-silently weakening validation. APIs with a different protocol need an adapter.
-The built-in Gemini adapter uses the existing `requests` dependency; no extra
-SDK installation is required.
-
-`LLM_MODEL` and `LLM_API_KEY`, if set, override provider-specific model/key
-settings. Remove stale generic overrides when switching providers.
-`LLM_MAX_OUTPUT_TOKENS` defaults to 4096 and `LLM_TIMEOUT_SECONDS` to 90.
-Output budgets must fit the selected model and account limits; increasing a
-budget can cause oversized requests. Requests ending with `length`,
-`MAX_TOKENS`, or another non-normal completion status are rejected before
-their content is accepted. This detects provider-reported truncation; normal
-completion does not establish code correctness or test completeness.
-
-Every built-in provider prints request and response diagnostics through the
-CLI's progress stream. Requests identify the provider, model, file or operation,
-configured output-token limit, timeout, and input character count (not a token
-estimate). Responses show the finish reason, provider-reported prompt,
-completion, reasoning and total tokens, output characters/bytes/lines, and
-elapsed time. Missing metadata is labeled `unreported`. Python file responses
-also receive a syntax diagnostic; this does not replace QA.
-
-Developer planning and file-generation metadata is saved as JSON Lines under
-`runs/<run-id>/diagnostics/development-attempt-N.jsonl` (or the selected runs
-directory). These logs survive generation failures and are outside staging and
-release candidates. They contain no prompts, source text, API keys, or raw
-exception messages. Responses are logged before validation, including those
-rejected for truncation. `output_limit_reached` identifies a provider-reported
-token cutoff; `normal_stop_not_completeness_proof` and
-`finish_reason_unreported` distinguish other cases. Token counters retain the
-provider's definitions; reasoning tokens are not necessarily additive to
-completion tokens.
-
-Agents accept `generator=` for custom adapters and tests; `client=` injects a
-native transport for the selected provider (Groq SDK client, or an HTTP client
-with `post()` for Gemini/compatible endpoints). The old `Groq*Agent` class names
-remain aliases. To add a new protocol, implement `TextGenerator`, add its settings
-and factory selection, and test request/response translation. Agents and workflow
-stages need no changes.
-
-All runtime dependencies are declared in `pyproject.toml`. It is sufficient
-for pip to install the project and its dependencies; a separate
-`requirements.txt` would duplicate that list. Requirements files are useful
-for installation constraints or pinned deployment environments, but this
-project does not currently need one. For development and tests, include the
-`dev` extra:
+**Creating a pull request requires Git and `gh` (GitHub CLI) installed and available on your PATH.** Authenticate before running the harness:
 
 ```bash
-python -m pip install -e '.[dev]'
+gh auth login
 ```
 
-The CLI displays operation progress as it happens, including validated file
-plans, file generation, actual QA check results, retries, and release staging.
-Interactive terminals show a current-operation indicator; redirected output
-uses plain lines without animation. The original final JSON summary still
-includes all stage results, artifact paths, run ID, and revision count.
-Exit codes remain 0 for STAGED, 2 for BLOCKED, and 1 for failure or invalid input.
+Configure your Git author (`user.name` and `user.email`) and ensure you have push access to the target repository's GitHub `origin`. The repository must be clean, with its current branch synchronized with origin. Standalone runs support staging only.
 
-All model requests share a global gate within the Python process. Successful
-requests proceed immediately. A **429 response** triggers a wait based on
-`Retry-After` / `retry-after-ms` headers, Gemini `RetryInfo.retryDelay`, or the error's "try again in"
-duration, plus **2 seconds of padding**. If multiple hints are present, the
-longest is respected. Without a valid hint, backoff starts at 5 seconds and
-doubles to a maximum of 60 seconds, plus padding.
+Release requires interactive approval. Rejecting the candidate or running without terminal input blocks release and preserves the candidate for review. Release decisions and results are saved in the run's release directory.
 
-The harness allows up to **5 retries** for temporary rate limits. If the error
-says the individual requested token count exceeds the TPM limit, it allows
-only **2 retries** for that condition, whether the provider returns HTTP 429 or HTTP
-413. A 413 is retried only when its TPM counts confirm `Requested > Limit`;
-other 413 errors propagate immediately. Exhaustion returns the error to the
-existing stage failure or documentation fallback handling. SDK automatic
-retries are disabled so these caps reflect actual API attempts. Other errors
-propagate immediately. The retry policy never shrinks or rewrites requests.
+## Development
 
-This covers Research, Developer planning and each file, QA assessments and
-feedback, and Release documentation. Rich shows a yellow countdown and retry
-messages; redirected output prints each wait once. There is no fixed cooldown;
-the former `GROQ_COOLDOWN_SECONDS` setting is no longer used. Separate harness
-processes do not share the gate. See [Groq's rate-limit guidance](https://console.groq.com/docs/rate-limits).
-
-Stages and the Developer Agent emit small best-effort events through
-`harness.events.emit_event`, using LangGraph's `get_stream_writer()`. Calls
-outside a graph safely do nothing. The CLI consumes `custom` for operations,
-`updates` for completed nodes and retries, and `values` for the complete final
-graph state. Events are never stored in workflow state or artifacts. This
-uses the LangGraph 1.x streaming API, verified with 1.2.16, and Rich 13–14.
-
-Run offline tests (mocked generation and sandbox execution):
+Install the development dependencies and run the tests:
 
 ```bash
-RUN_LIVE_GROQ=0 python -m pytest -q
-RUN_LIVE_GROQ=0 python -m pytest -q tests/test_events.py tests/test_progress.py tests/test_cli.py tests/test_generation_events.py tests/test_qa_release_events.py tests/integration/test_streaming.py
+python -m pip install -e ".[dev]"
+python -m pytest -q
 ```
 
-Existing live Groq tests remain opt-in with `RUN_LIVE_GROQ=1`.
+Live Groq tests are opt-in with `RUN_LIVE_GROQ=1`; leave it unset for offline tests.
 
-Structured outputs cover Research, Developer planning, QA requirements and
-feedback, and Release documentation. Groq and compatible endpoints use the
-strict JSON Schema helper in `src/harness/tools/structured_output.py`; the
-configured model must support strict structured outputs. Gemini uses native
-JSON-schema output with references inlined and unsupported decoder constraints
-removed. Local Pydantic validation retains the complete original constraints
-and application rules for every provider. Developer file generation continues
-to return plain source text.
 
-### QA dependencies
-
-QA first checks Docker access and the local QA image before preparing a
-workspace. Start Docker Desktop (or the Docker daemon) before running QA.
-If `harness-qa-python:3.11` is missing, QA builds it automatically from the
-harness's `docker/qa-python.Dockerfile`, using an empty build context. The
-first build needs network access and has a ten-minute timeout. Existing
-images are reused. Docker access, inspection, or build errors stop QA as
-`BLOCKED`, with the exception and Docker diagnostics shown in the result;
-they do not trigger Developer retries.
-
-You can also build or rebuild the image manually from the source checkout:
-
-```bash
-docker build -f docker/qa-python.Dockerfile -t harness-qa-python:3.11 .
-```
-
-The Developer plan's `dependencies` array is the canonical dependency
-manifest for Python QA. Declare runtime and test dependencies as PEP 508
-distribution requirements, for example `Pillow>=10` (the distribution that
-provides `PIL`) and `pytest>=8`. Use an empty array for standard-library-only
-implementations. Entries cannot be shell commands, URLs, local paths, or prose.
-QA does not automatically install from generated `requirements.txt` files;
-such a file is unnecessary solely to provision QA and may conflict with a
-task's file-count constraint.
-
-Before tests, QA installs declared dependencies in a separate network-enabled
-setup container using wheels only. That container mounts no project sources
-or secrets. Dependency artifacts live under `qa/attempt-N/dependencies`,
-outside the generated workspace and release. Setup status and logs are
-recorded in `qa/attempt-N/test_report.json`.
-Tests run offline with the dependency directory mounted read-only. Neither
-setup nor testing installs packages into the host Python environment.
-
-A dependency setup failure returns QA `BLOCKED` and does not trigger a
-Developer retry. Missing imports whose roots cannot be found in the workspace
-also conservatively block QA; the harness does not guess distribution names
-or install from test output. Missing submodules of identifiable local modules
-remain implementation failures. Missing system shared libraries block QA and
-must be supplied by the trusted QA Docker image, rather than Python packages.
-Packages available only as source distributions cannot be installed through
-this wheel-only setup. Review the dependency setup logs when resolution,
-network access, or wheel availability prevents verification.
-
-### Project Requirements
-
+## Project Requirements
 ```
     Build an agentic harness which has four stages.
 
