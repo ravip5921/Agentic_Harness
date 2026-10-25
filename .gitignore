@@ -222,3 +222,4 @@ __marimo__/
 /dev_tools/
 
 /runs/
+/demo/example_run/**/dependencies/

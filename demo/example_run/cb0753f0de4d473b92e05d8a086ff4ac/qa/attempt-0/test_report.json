@@ -1,0 +1,461 @@
+{
+  "run_id": "cb0753f0de4d473b92e05d8a086ff4ac",
+  "revision_count": 0,
+  "verdict": "fail",
+  "summary": "Implementation failed execution or requirements QA.",
+  "checks": [
+    {
+      "name": "dependency_setup",
+      "check_type": "dependency_setup",
+      "status": "passed",
+      "command": [
+        "docker",
+        "run",
+        "--rm",
+        "--pull",
+        "never",
+        "--name",
+        "harness-qa-dependencies-7285f6a900834141b339b7c956a1d673",
+        "--network",
+        "bridge",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges:true",
+        "--pids-limit",
+        "128",
+        "--memory",
+        "512m",
+        "--memory-swap",
+        "512m",
+        "--cpus",
+        "1.0",
+        "--user",
+        "65534:65534",
+        "--tmpfs",
+        "/tmp:rw,nosuid,noexec,size=256m",
+        "--env",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "--env",
+        "HOME=/tmp",
+        "--mount",
+        "type=bind,src=D:\\Agentic_Harness\\runs\\cb0753f0de4d473b92e05d8a086ff4ac\\qa\\attempt-0\\dependencies,dst=/dependencies",
+        "--workdir",
+        "/tmp",
+        "harness-qa-python:3.11",
+        "python",
+        "-c",
+        "import os\nimport runpy\n\nos.umask(0)\nrunpy.run_module(\"pip\", run_name=\"__main__\")\n",
+        "--isolated",
+        "--disable-pip-version-check",
+        "install",
+        "--no-cache-dir",
+        "--only-binary=:all:",
+        "--ignore-installed",
+        "--no-compile",
+        "--target",
+        "/dependencies",
+        "--index-url",
+        "https://pypi.org/simple",
+        "--",
+        "pytest"
+      ],
+      "exit_code": 0,
+      "duration_seconds": 10.65700000000652,
+      "stdout": "",
+      "stderr": "",
+      "timed_out": false,
+      "message": "Declared Python dependencies installed for offline QA tests."
+    },
+    {
+      "name": "syntax",
+      "check_type": "syntax",
+      "status": "passed",
+      "command": [
+        "docker",
+        "run",
+        "--rm",
+        "--pull",
+        "never",
+        "--name",
+        "harness-qa-123999afe0a747c7a9b81ce6b923007b",
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges:true",
+        "--pids-limit",
+        "128",
+        "--memory",
+        "512m",
+        "--memory-swap",
+        "512m",
+        "--cpus",
+        "1.0",
+        "--user",
+        "65534:65534",
+        "--tmpfs",
+        "/tmp:rw,nosuid,noexec,size=64m",
+        "--env",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "--env",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
+        "--env",
+        "PYTHONPATH=/workspace:/workspace/src",
+        "--env",
+        "HOME=/tmp",
+        "--mount",
+        "type=bind,src=D:\\Agentic_Harness\\runs\\cb0753f0de4d473b92e05d8a086ff4ac\\qa\\attempt-0\\workspace,dst=/workspace,readonly",
+        "--workdir",
+        "/workspace",
+        "harness-qa-python:3.11",
+        "python",
+        "-c",
+        "\nimport ast\nfrom pathlib import Path\n\nroot = Path(\"/workspace\")\n\nfiles = sorted(\n    path for path in root.rglob(\"*.py\")\n    if path.is_file()\n)\n\nif not files:\n    raise SystemExit(\"No Python files found\")\n\nfailures = 0\n\nfor path in files:\n    try:\n        ast.parse(\n            path.read_text(encoding=\"utf-8\"),\n            filename=str(path),\n        )\n        print(f\"PASS {path.relative_to(root)}\")\n    except (SyntaxError, UnicodeError) as exc:\n        failures += 1\n        print(f\"FAIL {path.relative_to(root)}: {exc}\")\n\nraise SystemExit(1 if failures else 0)\n"
+      ],
+      "exit_code": 0,
+      "duration_seconds": 0.625,
+      "stdout": "PASS src/integrations/__init__.py\nPASS src/integrations/base.py\nPASS src/integrations/github.py\nPASS src/integrations/utils.py\nPASS tests/test_base.py\nPASS tests/test_github.py\nPASS tests/test_utils.py\n",
+      "stderr": "",
+      "timed_out": false,
+      "message": "Check passed."
+    },
+    {
+      "name": "unit_test",
+      "check_type": "unit_test",
+      "status": "failed",
+      "command": [
+        "docker",
+        "run",
+        "--rm",
+        "--pull",
+        "never",
+        "--name",
+        "harness-qa-0837be9e85f64604b0929b37870fd788",
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges:true",
+        "--pids-limit",
+        "128",
+        "--memory",
+        "512m",
+        "--memory-swap",
+        "512m",
+        "--cpus",
+        "1.0",
+        "--user",
+        "65534:65534",
+        "--tmpfs",
+        "/tmp:rw,nosuid,noexec,size=64m",
+        "--env",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "--env",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
+        "--env",
+        "PYTHONPATH=/workspace:/workspace/src:/qa-dependencies",
+        "--env",
+        "HOME=/tmp",
+        "--mount",
+        "type=bind,src=D:\\Agentic_Harness\\runs\\cb0753f0de4d473b92e05d8a086ff4ac\\qa\\attempt-0\\workspace,dst=/workspace,readonly",
+        "--mount",
+        "type=bind,src=D:\\Agentic_Harness\\runs\\cb0753f0de4d473b92e05d8a086ff4ac\\qa\\attempt-0\\dependencies,dst=/qa-dependencies,readonly",
+        "--workdir",
+        "/workspace",
+        "harness-qa-python:3.11",
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "exit_code": 1,
+      "duration_seconds": 3.0459999999729916,
+      "stdout": ".....F.F......                                                           [100%]\n=================================== FAILURES ===================================\n__________________________ test_list_users_pagination __________________________\n\nmock_urlopen = <MagicMock name='urlopen' id='126136045086416'>\n\n    @patch(\"urllib.request.urlopen\")\n    def test_list_users_pagination(mock_urlopen):\n        # First page\n        resp1 = MagicMock()\n        resp1.read.return_value = json.dumps([{\"id\": 1, \"login\": \"u1\", \"html_url\": \"url1\"}]).encode(\"utf-8\")\n        resp1.headers = {\"Link\": '<https://api.github.com/page2>; rel=\"next\"'}\n    \n        # Second page\n        resp2 = MagicMock()\n        resp2.read.return_value = json.dumps([{\"id\": 2, \"login\": \"u2\", \"html_url\": \"url2\"}]).encode(\"utf-8\")\n        resp2.headers = {}\n    \n        mock_urlopen.side_effect = [resp1, resp2]\n    \n        connector = GitHubConnector(organization=\"test-org\", token=\"token\")\n>       users = connector.list_users()\n                ^^^^^^^^^^^^^^^^^^^^^^\n\ntests/test_github.py:51: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nsrc/integrations/github.py:44: in list_users\n    data = json.loads(response.read().decode(\"utf-8\"))\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\ns = <MagicMock name='mock.__enter__().read().decode()' id='126136014088400'>\ncls = None, object_hook = None, parse_float = None, parse_int = None\nparse_constant = None, object_pairs_hook = None, kw = {}\n\n    def loads(s, *, cls=None, object_hook=None, parse_float=None,\n            parse_int=None, parse_constant=None, object_pairs_hook=None, **kw):\n        \"\"\"Deserialize ``s`` (a ``str``, ``bytes`` or ``bytearray`` instance\n        containing a JSON document) to a Python object.\n    \n        ``object_hook`` is an optional function that will be called with the\n        result of any object literal decode (a ``dict``). The return value of\n        ``object_hook`` will be used instead of the ``dict``. This feature\n        can be used to implement custom decoders (e.g. JSON-RPC class hinting).\n    \n        ``object_pairs_hook`` is an optional function that will be called with the\n        result of any object literal decoded with an ordered list of pairs.  The\n        return value of ``object_pairs_hook`` will be used instead of the ``dict``.\n        This feature can be used to implement custom decoders.  If ``object_hook``\n        is also defined, the ``object_pairs_hook`` takes priority.\n    \n        ``parse_float``, if specified, will be called with the string\n        of every JSON float to be decoded. By default this is equivalent to\n        float(num_str). This can be used to use another datatype or parser\n        for JSON floats (e.g. decimal.Decimal).\n    \n        ``parse_int``, if specified, will be called with the string\n        of every JSON int to be decoded. By default this is equivalent to\n        int(num_str). This can be used to use another datatype or parser\n        for JSON integers (e.g. float).\n    \n        ``parse_constant``, if specified, will be called with one of the\n        following strings: -Infinity, Infinity, NaN.\n        This can be used to raise an exception if invalid JSON numbers\n        are encountered.\n    \n        To use a custom ``JSONDecoder`` subclass, specify it with the ``cls``\n        kwarg; otherwise ``JSONDecoder`` is used.\n        \"\"\"\n        if isinstance(s, str):\n            if s.startswith('\\ufeff'):\n                raise JSONDecodeError(\"Unexpected UTF-8 BOM (decode using utf-8-sig)\",\n                                      s, 0)\n        else:\n            if not isinstance(s, (bytes, bytearray)):\n>               raise TypeError(f'the JSON object must be str, bytes or bytearray, '\n                                f'not {s.__class__.__name__}')\nE               TypeError: the JSON object must be str, bytes or bytearray, not MagicMock\n\n/usr/local/lib/python3.11/json/__init__.py:339: TypeError\n___________________________ test_list_users_timeout ____________________________\n\nmock_urlopen = <MagicMock name='urlopen' id='126136014447632'>\n\n    @patch(\"urllib.request.urlopen\")\n    def test_list_users_timeout(mock_urlopen):\n        mock_urlopen.side_effect = TimeoutError(\"Connection timed out\")\n        connector = GitHubConnector(organization=\"test-org\", token=\"token\")\n        with pytest.raises(RuntimeError):\n>           connector.list_users()\n\ntests/test_github.py:72: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nsrc/integrations/github.py:43: in list_users\n    with urllib.request.urlopen(request, timeout=self.timeout) as response:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/unittest/mock.py:1124: in __call__\n    return self._mock_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/unittest/mock.py:1128: in _mock_call\n    return self._execute_mock_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nself = <MagicMock name='urlopen' id='126136014447632'>\nargs = (<urllib.request.Request object at 0x72b85451c510>,)\nkwargs = {'timeout': 10.0}\n\n    def _execute_mock_call(self, /, *args, **kwargs):\n        # separate from _increment_mock_call so that awaited functions are\n        # executed separately from their call, also AsyncMock overrides this method\n    \n        effect = self.side_effect\n        if effect is not None:\n            if _is_exception(effect):\n>               raise effect\nE               TimeoutError: Connection timed out\n\n/usr/local/lib/python3.11/unittest/mock.py:1183: TimeoutError\n=========================== short test summary info ============================\nFAILED tests/test_github.py::test_list_users_pagination - TypeError: the JSON...\nFAILED tests/test_github.py::test_list_users_timeout - TimeoutError: Connecti...\n2 failed, 12 passed in 0.82s\n",
+      "stderr": "",
+      "timed_out": false,
+      "message": "Check failed with exit code 1."
+    }
+  ],
+  "feedback": {
+    "summary": "The GitHubConnector implementation failed unit tests due to incorrect mocking of the context manager in tests/test_github.py and an unhandled exception type in the timeout test.",
+    "file_feedback": [
+      {
+        "path": "tests/test_github.py",
+        "category": "test_failure",
+        "message": "The test_list_users_pagination test fails because the mock_urlopen.side_effect returns MagicMock objects directly, but the implementation uses 'with urllib.request.urlopen(...) as response:', which expects the mock to support the context manager protocol (__enter__).",
+        "line": 51,
+        "related_test": "test_list_users_pagination"
+      },
+      {
+        "path": "tests/test_github.py",
+        "category": "test_failure",
+        "message": "The test_list_users_timeout test fails because the implementation catches urllib.error.URLError, but the test raises a built-in TimeoutError, which is not caught by the current exception handling block.",
+        "line": 72,
+        "related_test": "test_list_users_timeout"
+      }
+    ],
+    "test_feedback": [
+      {
+        "test_name": "test_list_users_pagination",
+        "message": "TypeError: the JSON object must be str, bytes or bytearray, not MagicMock. The mock setup in the test does not correctly simulate the context manager returned by urlopen.",
+        "related_files": [
+          "tests/test_github.py"
+        ],
+        "check_name": null
+      },
+      {
+        "test_name": "test_list_users_timeout",
+        "message": "TimeoutError: Connection timed out. The implementation does not catch the built-in TimeoutError, causing the test to fail instead of raising the expected RuntimeError.",
+        "related_files": [
+          "tests/test_github.py"
+        ],
+        "check_name": null
+      }
+    ],
+    "recommendations": [
+      "unit_test failed (unit_test):\n`dict``. This feature\n        can be used to implement custom decoders (e.g. JSON-RPC class hinting).\n    \n        ``object_pairs_hook`` is an optional function that will be called with the\n        result of any object literal decoded with an ordered list of pairs.  The\n        return value of ``object_pairs_hook`` will be used instead of the ``dict``.\n        This feature can be used to implement custom decoders.  If ``object_hook``\n        is also defined, the ``object_pairs_hook`` takes priority.\n    \n        ``parse_float``, if specified, will be called with the string\n        of every JSON float to be decoded. By default this is equivalent to\n        float(num_str). This can be used to use another datatype or parser\n        for JSON floats (e.g. decimal.Decimal).\n    \n        ``parse_int``, if specified, will be called with the string\n        of every JSON int to be decoded. By default this is equivalent to\n        int(num_str). This can be used to use another datatype or parser\n        for JSON integers (e.g. float).\n    \n        ``parse_constant``, if specified, will be called with one of the\n        following strings: -Infinity, Infinity, NaN.\n        This can be used to raise an exception if invalid JSON numbers\n        are encountered.\n    \n        To use a custom ``JSONDecoder`` subclass, specify it with the ``cls``\n        kwarg; otherwise ``JSONDecoder`` is used.\n        \"\"\"\n        if isinstance(s, str):\n            if s.startswith('\\ufeff'):\n                raise JSONDecodeError(\"Unexpected UTF-8 BOM (decode using utf-8-sig)\",\n                                      s, 0)\n        else:\n            if not isinstance(s, (bytes, bytearray)):\n>               raise TypeError(f'the JSON object must be str, bytes or bytearray, '\n                                f'not {s.__class__.__name__}')\nE               TypeError: the JSON object must be str, bytes or bytearray, not MagicMock\n\n/usr/local/lib/python3.11/json/__init__.py:339: TypeError\n___________________________ test_list_users_timeout ____________________________\n\nmock_urlopen = <MagicMock name='urlopen' id='126136014447632'>\n\n    @patch(\"urllib.request.urlopen\")\n    def test_list_users_timeout(mock_urlopen):\n        mock_urlopen.side_effect = TimeoutError(\"Connection timed out\")\n        connector = GitHubConnector(organization=\"test-org\", token=\"token\")\n        with pytest.raises(RuntimeError):\n>           connector.list_users()\n\ntests/test_github.py:72: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nsrc/integrations/github.py:43: in list_users\n    with urllib.request.urlopen(request, timeout=self.timeout) as response:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/unittest/mock.py:1124: in __call__\n    return self._mock_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.11/unittest/mock.py:1128: in _mock_call\n    return self._execute_mock_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nself = <MagicMock name='urlopen' id='126136014447632'>\nargs = (<urllib.request.Request object at 0x72b85451c510>,)\nkwargs = {'timeout': 10.0}\n\n    def _execute_mock_call(self, /, *args, **kwargs):\n        # separate from _increment_mock_call so that awaited functions are\n        # executed separately from their call, also AsyncMock overrides this method\n    \n        effect = self.side_effect\n        if effect is not None:\n            if _is_exception(effect):\n>               raise effect\nE               TimeoutError: Connection timed out\n\n/usr/local/lib/python3.11/unittest/mock.py:1183: TimeoutError\n=========================== short test summary info ============================\nFAILED tests/test_github.py::test_list_users_pagination - TypeError: the JSON...\nFAILED tests/test_github.py::test_list_users_timeout - TimeoutError: Connecti...\n2 failed, 12 passed in 0.82s",
+      "REQ-12: Add comprehensive pytest tests using mocking for network calls.\nFinding: The tests fail due to incorrect mocking of the response object (passing a MagicMock instead of a file-like object to json.loads).",
+      "AC-6: New tests in tests/test_github.py pass with 100% coverage of the new connector logic.\nFinding: Tests failed due to incorrect mocking implementation.",
+      "In tests/test_github.py, update the mock setup for test_list_users_pagination to use 'mock_response.__enter__.return_value = mock_response' or similar to support the context manager pattern.",
+      "In src/integrations/github.py, update the exception handling in list_users to catch TimeoutError explicitly or ensure the mock in tests/test_github.py raises a type that is caught by the existing logic (e.g., urllib.error.URLError).",
+      "Ensure all tests consistently use the same mocking pattern for context managers to avoid similar TypeErrors."
+    ],
+    "development_attempt": 0
+  },
+  "manifest_path": "D:\\Agentic_Harness\\runs\\cb0753f0de4d473b92e05d8a086ff4ac\\development\\attempt-0\\manifest.json",
+  "workspace_path": "D:\\Agentic_Harness\\runs\\cb0753f0de4d473b92e05d8a086ff4ac\\qa\\attempt-0\\workspace",
+  "requirements_assessment": {
+    "findings": [
+      {
+        "requirement_id": "REQ-1",
+        "requirement": "Implement GitHubConnector in src/integrations/github.py inheriting from integrations.base.Connector.",
+        "status": "satisfied",
+        "explanation": "GitHubConnector is implemented in src/integrations/github.py and inherits from Connector.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "REQ-2",
+        "requirement": "Constructor must accept organization: str, token: str, and timeout: float = 10.0.",
+        "status": "satisfied",
+        "explanation": "The constructor signature matches the requirement.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "REQ-3",
+        "requirement": "Validate that organization and token are non-empty strings.",
+        "status": "satisfied",
+        "explanation": "Validation logic is present in the constructor.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "REQ-4",
+        "requirement": "Use standard library urllib.request for HTTP calls.",
+        "status": "satisfied",
+        "explanation": "The implementation uses urllib.request.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "REQ-5",
+        "requirement": "Implement pagination using the Link header or by following the API specification for GET /orgs/{org}/members.",
+        "status": "satisfied",
+        "explanation": "Pagination logic is implemented using the Link header.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "REQ-6",
+        "requirement": "Set headers: Authorization: Bearer <token> and Accept: application/vnd.github+json.",
+        "status": "satisfied",
+        "explanation": "Headers are correctly set in the request.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "REQ-7",
+        "requirement": "Apply the configured timeout to all requests.",
+        "status": "satisfied",
+        "explanation": "The timeout parameter is passed to urlopen.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "REQ-8",
+        "requirement": "Map GitHub response fields: id (as string) to User.id, login to User.username, and html_url to User.profile_url.",
+        "status": "satisfied",
+        "explanation": "Mapping logic is correctly implemented.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "REQ-9",
+        "requirement": "Raise exceptions for all HTTP errors (4xx, 5xx) and transport errors.",
+        "status": "satisfied",
+        "explanation": "Error handling is implemented for HTTPError and URLError.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "REQ-10",
+        "requirement": "Ensure no partial results are returned on failure.",
+        "status": "satisfied",
+        "explanation": "The implementation raises exceptions on failure, preventing partial results.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "REQ-11",
+        "requirement": "Do not log sensitive tokens.",
+        "status": "satisfied",
+        "explanation": "No logging of tokens is present in the code.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "REQ-12",
+        "requirement": "Add comprehensive pytest tests using mocking for network calls.",
+        "status": "not_satisfied",
+        "explanation": "The tests fail due to incorrect mocking of the response object (passing a MagicMock instead of a file-like object to json.loads).",
+        "implementation_files": [],
+        "test_files": [
+          "tests/test_github.py"
+        ],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "REQ-13",
+        "requirement": "Include documentation with placeholder credentials.",
+        "status": "satisfied",
+        "explanation": "Docstring in GitHubConnector provides usage documentation.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "AC-1",
+        "requirement": "GitHubConnector correctly maps GitHub API response to User objects.",
+        "status": "satisfied",
+        "explanation": "The mapping logic is correct.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "AC-2",
+        "requirement": "GitHubConnector handles pagination correctly when multiple pages exist.",
+        "status": "uncertain",
+        "explanation": "The test failed due to a mocking error, preventing verification of the pagination logic.",
+        "implementation_files": [],
+        "test_files": [
+          "tests/test_github.py"
+        ],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "AC-3",
+        "requirement": "GitHubConnector raises appropriate exceptions on 4xx/5xx errors.",
+        "status": "satisfied",
+        "explanation": "The implementation correctly catches and raises exceptions.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "AC-4",
+        "requirement": "GitHubConnector respects the configured timeout.",
+        "status": "satisfied",
+        "explanation": "The timeout is passed to the urllib call.",
+        "implementation_files": [
+          "src/integrations/github.py"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "AC-5",
+        "requirement": "All baseline tests in tests/test_base.py and tests/test_utils.py pass.",
+        "status": "satisfied",
+        "explanation": "Baseline tests passed.",
+        "implementation_files": [],
+        "test_files": [
+          "tests/test_base.py",
+          "tests/test_utils.py"
+        ],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "AC-6",
+        "requirement": "New tests in tests/test_github.py pass with 100% coverage of the new connector logic.",
+        "status": "not_satisfied",
+        "explanation": "Tests failed due to incorrect mocking implementation.",
+        "implementation_files": [],
+        "test_files": [
+          "tests/test_github.py"
+        ],
+        "missing_coverage": []
+      },
+      {
+        "requirement_id": "AC-7",
+        "requirement": "No runtime dependencies are added to pyproject.toml.",
+        "status": "satisfied",
+        "explanation": "No dependencies were added.",
+        "implementation_files": [
+          "pyproject.toml"
+        ],
+        "test_files": [],
+        "missing_coverage": []
+      }
+    ],
+    "overall_summary": "The implementation of GitHubConnector is logically correct and follows the requirements. However, the unit tests in tests/test_github.py are incorrectly implemented. Specifically, the mock for urlopen returns a MagicMock object, but json.loads expects a file-like object (or string/bytes), causing a TypeError. Additionally, the timeout test fails because it raises a TimeoutError directly instead of mocking the response to trigger the timeout within the context manager. The implementation itself is sound, but the test suite requires correction."
+  }
+}

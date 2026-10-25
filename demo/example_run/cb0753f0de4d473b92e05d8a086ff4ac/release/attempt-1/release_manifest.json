@@ -1,0 +1,29 @@
+{
+  "run_id": "cb0753f0de4d473b92e05d8a086ff4ac",
+  "revision_count": 1,
+  "summary": "Implementing GitHubConnector with robust error handling and corrected test mocks to satisfy QA requirements.",
+  "files": [
+    {
+      "path": "src/integrations/github.py",
+      "operation": "create",
+      "sha256": "ceddf13080d8c37c67e8825ba1005a60f1e7327b0b6a1effe1f2e611d25686c6",
+      "original_sha256": null
+    },
+    {
+      "path": "tests/test_github.py",
+      "operation": "create",
+      "sha256": "dc049bb77509f780688a5ed102cf47bafb681049717e8f194e55073cb7974013",
+      "original_sha256": null
+    },
+    {
+      "path": "src/integrations/__init__.py",
+      "operation": "modify",
+      "sha256": "baaf3c1032dc92e6c279faa39b6614dd9babd8ca40e9bdcd8551f33da8b37980",
+      "original_sha256": "3daf5a6a35e5690e28cae958f3412c69f6e5549aaaff3fde03174facf5021202"
+    }
+  ],
+  "source_manifest_path": "D:\\Agentic_Harness\\runs\\cb0753f0de4d473b92e05d8a086ff4ac\\development\\attempt-1\\manifest.json",
+  "qa_report_path": "D:\\Agentic_Harness\\runs\\cb0753f0de4d473b92e05d8a086ff4ac\\qa\\attempt-1\\test_report.json",
+  "repository_path": "D:\\Agentic_Harness\\examples\\integration-demo",
+  "release_directory": "D:\\Agentic_Harness\\runs\\cb0753f0de4d473b92e05d8a086ff4ac\\release\\attempt-1\\candidate"
+}

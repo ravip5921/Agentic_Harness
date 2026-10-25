@@ -1,0 +1,31 @@
+{
+  "summary": "Implementing GitHubConnector with robust error handling and corrected test mocks to satisfy QA requirements.",
+  "files": [
+    {
+      "path": "src/integrations/github.py",
+      "operation": "create",
+      "sha256": "ceddf13080d8c37c67e8825ba1005a60f1e7327b0b6a1effe1f2e611d25686c6",
+      "original_sha256": null
+    },
+    {
+      "path": "tests/test_github.py",
+      "operation": "create",
+      "sha256": "dc049bb77509f780688a5ed102cf47bafb681049717e8f194e55073cb7974013",
+      "original_sha256": null
+    },
+    {
+      "path": "src/integrations/__init__.py",
+      "operation": "modify",
+      "sha256": "baaf3c1032dc92e6c279faa39b6614dd9babd8ca40e9bdcd8551f33da8b37980",
+      "original_sha256": "3daf5a6a35e5690e28cae958f3412c69f6e5549aaaff3fde03174facf5021202"
+    }
+  ],
+  "dependencies": [
+    "pytest>=8"
+  ],
+  "notes": [
+    "The implementation now explicitly catches TimeoutError in addition to urllib.error.URLError.",
+    "The tests use __enter__.return_value to correctly mock the context manager behavior of urlopen.",
+    "No new runtime dependencies are introduced."
+  ]
+}

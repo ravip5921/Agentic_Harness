@@ -1,0 +1,31 @@
+{
+  "summary": "Implement GitHubConnector in src/integrations/github.py to fetch organization members via GitHub REST API using urllib. Add comprehensive unit tests in tests/test_github.py.",
+  "files": [
+    {
+      "path": "src/integrations/github.py",
+      "operation": "create",
+      "sha256": "f0f89276bb08eedd115f7209d46ecfcc6d195913985ee5b7826b8513d4698600",
+      "original_sha256": null
+    },
+    {
+      "path": "tests/test_github.py",
+      "operation": "create",
+      "sha256": "6b31210c3426ac9506a64a144d0a36904448e6cc0f703707d6eb3886edb6157e",
+      "original_sha256": null
+    },
+    {
+      "path": "src/integrations/__init__.py",
+      "operation": "modify",
+      "sha256": "baaf3c1032dc92e6c279faa39b6614dd9babd8ca40e9bdcd8551f33da8b37980",
+      "original_sha256": "3daf5a6a35e5690e28cae958f3412c69f6e5549aaaff3fde03174facf5021202"
+    }
+  ],
+  "dependencies": [
+    "pytest"
+  ],
+  "notes": [
+    "The implementation uses standard library urllib.request as requested.",
+    "Pagination is handled by parsing the 'Link' header from GitHub API responses.",
+    "Sensitive tokens are not logged; exceptions are raised for all non-2xx HTTP responses."
+  ]
+}

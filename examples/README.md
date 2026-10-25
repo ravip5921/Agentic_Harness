@@ -1,58 +1,74 @@
-# Existing-repository integration demo
+# GitHub organization connector demo
 
-`integration-demo/` is the target repository directory. It intentionally has
-only a connector contract and baseline tests; the harness generates the GitHub
-implementation. Git initialization is optional for the current staging flow.
+This example uses the [GitHub members task](github-members-task.txt) to extend an existing Python library with a `GitHubConnector`. The connector lists members of a configured GitHub organization, maps them to the library's `User` model, follows pagination, and handles HTTP and transport errors.
 
-Run these commands from the harness root using its installed environment:
+The supplied [integration-demo/](integration-demo/) contains the connector contract and baseline tests. The harness generates the GitHub implementation and its tests while preserving the existing contract.
+
+## Recorded demo outcome
+
+Run `cb0753f0de4d473b92e05d8a086ff4ac` completed the workflow with final release status **`pr_created`**. The saved QA and release reports record:
+
+| Step | Recorded result |
+| --- | --- |
+| Research | Produced the engineering specification for `GitHubConnector` |
+| Developer, attempt 0 | Generated the connector, tests, and package export changes |
+| QA, attempt 0 | Syntax passed; pytest reported 12 passed and 2 failed, involving pagination test mocking and timeout handling |
+| Developer, attempt 1 | Revised the output in response to QA feedback |
+| QA, attempt 1 | Syntax passed; all 14 tests passed; requirements assessment returned `pass` |
+| Release | Prepared the candidate, recorded human approval to create a PR, and reported draft PR creation |
+
+The release result records [integration-demo pull request #5](https://github.com/ravip5921/integration-demo/pull/5). The changes create `src/integrations/github.py` and `tests/test_github.py`, and modify `src/integrations/__init__.py` to export the connector.
+
+This run demonstrates the QA repair loop as well as generation and human-approved release. It completed after one Developer revision.
+
+See [demo materials](../demo/README.md) for the slides, saved run artifacts, and recording availability.
+
+## Run the example
+
+Complete the root README's [setup instructions](../README.md#setup), including model provider configuration and starting Docker. Run the following from the harness root with the environment active.
+
+Check the supplied baseline:
 
 ```bash
-.venv/bin/python -m pytest -q examples/integration-demo
-docker image inspect harness-qa-python:3.11
-# Build the trusted QA image if it is missing:
-docker build -f docker/qa-python.Dockerfile -t harness-qa-python:3.11 .
-
-.venv/bin/python -m harness.main "$(cat examples/github-members-task.txt)" \
-  --repository examples/integration-demo \
-  --documentation-url 'https://docs.github.com/en/rest/orgs/members' \
-  --runs-dir runs/integration-demo \
-  --max-dev-revisions 2
+python -m pytest -q examples/integration-demo
 ```
 
-Requires a configured `GROQ_API_KEY`, external access to Groq and documentation,
-and a usable Docker daemon with the QA image. The documentation fetcher rejects
-responses above 100,000 bytes and retains only the first 6,000 characters. If
-the official page exceeds that limit, Research will block; inspect the actual
-Research result before treating documentation retrieval as successful.
+On Windows PowerShell:
 
-A successful run must show Research and Developer outcomes `completed`, QA
-verdict `pass`, and Release status `staged`. Inspect the engineering spec under `research/`, the generated
-manifest and files under `development/attempt-N/`, the actual executed checks
-and requirement findings in `qa/attempt-N/test_report.json`, and the candidate
-and release report under `release/attempt-N/`. The final CLI output gives their
-exact paths. Check that the candidate preserves the baseline files and adds
-the connector and tests, and that the original target remains unchanged.
+```powershell
+$taskText = Get-Content examples/github-members-task.txt -Raw
+harness "$taskText" --repository examples/integration-demo --runs-dir runs --max-dev-revisions 2
+```
 
-STAGED means an isolated candidate has been prepared. It does not mean `git
-add`, commit, merge, deployment, or modification of the target directory.
-Mocked connector tests establish implementation behavior without exercising
-live GitHub authentication or organization permissions.
+On macOS or Linux:
 
-## Initial execution result
+```bash
+harness "$(cat examples/github-members-task.txt)" --repository examples/integration-demo --runs-dir runs --max-dev-revisions 2
+```
 
-On October 23, 2026, the two baseline tests passed. CLI run
-`4baac1a9b9b042a581907e8b4ca4c554` inspected all four target files, then returned
-`blocked` (exit code 2): `Could not resolve documentation host.` Developer,
-QA, and Release did not execute. Docker image inspection also failed with
-permission denied connecting to `/var/run/docker.sock`, including outside the
-sandbox; image availability could not be established.
+The harness builds its QA Docker image automatically if needed. After QA passes, approve the release and select `staged` to keep the candidate locally. Git initialization is optional for this staging flow. To publish a draft PR as in the recorded demo, use a clean, synchronized Git checkout with a GitHub origin, push access, and authenticated `gh`; see [release prerequisites](../README.md#release).
 
-Automatic approval review initially rejected the network-enabled retry because
-it would send repository context and task text to Groq without specific approval
-for that external transfer. The user subsequently approved sending only the new
-demo repository files and task text. Network-enabled run
-`f4a655669d3f480e8062c165efbf7d4d` then resolved the documentation host, but
-Research returned `blocked` (exit code 2): `Documentation exceeds retrieval
-limit.` The official page exceeds the fetcher's 100,000-byte limit. No model
-generation, successful end-to-end result, or staged candidate has been
-established. Release implementation was not changed.
+Model outputs can vary, so a rerun may produce different files or require a different number of revisions.
+
+## Inspect the output
+
+Artifacts are saved under `runs/<run-id>/`. For the recorded run, the directory is `runs/cb0753f0de4d473b92e05d8a086ff4ac/`, and the final attempt is `attempt-1`.
+
+| Artifact path within the run | What it contains |
+| --- | --- |
+| `research/engineering_spec.md` and `engineering_spec.json` | Engineering design and requirements |
+| `development/attempt-1/manifest.json` and `staging/` | Generated file manifest and implementation |
+| `qa/attempt-0/test_report.json` | Initial failures that triggered revision |
+| `qa/attempt-1/test_report.json` | Final execution results and requirements assessment |
+| `release/attempt-1/candidate/` | Prepared project candidate |
+| `release/attempt-1/release_report.md` | Changes, testing summary, and review notes |
+| `release/attempt-1/release_decision.json` and `release_result.json` | Human decision, final status, and PR reference |
+
+The `runs/` directory is excluded from version control. A copy of this demo run is provided in [demo/example_run/](../demo/example_run/cb0753f0de4d473b92e05d8a086ff4ac/) for review. The CLI prints the artifact locations for each new run.
+
+## Validation boundaries
+
+- The suite contains 14 passing tests, including the existing baseline tests; connector tests use mocked HTTP calls. This result does not establish live GitHub authentication or organization permission behavior, and it is not a coverage measurement.
+- The connector's intended scope is organization members visible to the supplied token, rather than every GitHub account or guaranteed visibility of private members.
+- The recorded Research evidence file is empty. This run demonstrates specification generation, but does not establish successful retrieval of external documentation.
+- `staged` keeps a candidate locally; `pr_created` records draft PR creation. Neither status means the changes were merged or deployed.
